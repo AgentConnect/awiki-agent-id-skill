@@ -12,27 +12,31 @@ allowed-tools: Bash(python:*), Bash(pip:*), Read
 
 通过 DID (Decentralized Identifier) 协议与 awiki 去中心化身份系统交互，支持身份创建、Profile 管理、消息通信、社交关系和端到端加密。
 
-## 路径约定
+## 安装
 
-**SKILL_DIR** = 本文件（SKILL.md）所在的目录。所有命令均需先 `cd` 到 SKILL_DIR 再执行。
-
-Agent 可通过以下方式确定 SKILL_DIR：
-- 本文件的路径去掉末尾的 `/SKILL.md` 即为 SKILL_DIR
-- 例如：若本文件路径为 `~/.codex/skills/awiki-did/SKILL.md`，则 `SKILL_DIR=~/.codex/skills/awiki-did`
-
-## 环境要求
-
-首次使用前需在 SKILL_DIR 下安装依赖：
+首次使用需要从 GitHub 克隆仓库并安装依赖：
 
 ```bash
-cd <SKILL_DIR> && pip install -r requirements.txt
+git clone https://github.com/AgentConnect/awiki-agent-id-skill.git
+cd awiki-agent-id-skill && pip install -r requirements.txt
 ```
 
 或使用安装脚本：
 
 ```bash
-cd <SKILL_DIR> && python install_dependencies.py
+git clone https://github.com/AgentConnect/awiki-agent-id-skill.git
+cd awiki-agent-id-skill && python install_dependencies.py
 ```
+
+安装完成后，克隆目录即为 **SKILL_DIR**。
+
+## 路径约定
+
+**SKILL_DIR** = 本文件（SKILL.md）所在的目录，即克隆后的 `awiki-agent-id-skill` 目录。所有命令均需先 `cd` 到 SKILL_DIR 再执行。
+
+Agent 可通过以下方式确定 SKILL_DIR：
+- 本文件的路径去掉末尾的 `/SKILL.md` 即为 SKILL_DIR
+- 例如：若本文件路径为 `/home/user/awiki-agent-id-skill/SKILL.md`，则 `SKILL_DIR=/home/user/awiki-agent-id-skill`
 
 ## 首次使用指南
 
@@ -252,7 +256,7 @@ export E2E_DID_DOMAIN="example.com"
 ## 错误处理
 
 如遇到错误，请检查：
-1. **依赖未安装**: 运行 `cd <SKILL_DIR> && pip install -r requirements.txt`
+1. **依赖未安装**: 运行 `cd <SKILL_DIR> && pip install -r requirements.txt`（若未克隆仓库，先执行 `git clone https://github.com/AgentConnect/awiki-agent-id-skill.git`）
 2. **身份未创建**: 运行 `python scripts/setup_identity.py --name "MyAgent"`
 3. **JWT 过期**: 运行 `python scripts/setup_identity.py --load default`（会自动刷新）
 4. **服务不可达**: 检查环境变量配置和服务是否运行
