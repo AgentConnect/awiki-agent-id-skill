@@ -265,3 +265,7 @@ Configure target service addresses via environment variables:
 
 - `<SKILL_DIR>/references/e2ee-protocol.md`
 - `<SKILL_DIR>/references/PROFILE_TEMPLATE.md`
+
+## How to Support DID Authentication in Your Service
+
+Refer to this guide: https://github.com/agent-network-protocol/anp/blob/master/examples/python/did_wba_examples/DID_WBA_AUTH_GUIDE.en.md
