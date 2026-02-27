@@ -307,13 +307,10 @@ async def check_status(
     # 4. E2EE 会话状态
     e2ee_state = load_e2ee_state(credential_name)
     if e2ee_state is not None:
-        sessions = e2ee_state.get("sessions", {})
-        active_count = sum(
-            1 for s in sessions.values() if s.get("status") == "ACTIVE"
-        )
-        pending_count = sum(
-            1 for s in sessions.values() if s.get("status") == "PENDING"
-        )
+        sessions = e2ee_state.get("sessions", [])
+        pending_sessions = e2ee_state.get("pending_sessions", [])
+        active_count = len(sessions)
+        pending_count = len(pending_sessions)
         report["e2ee_sessions"] = {"active": active_count, "pending": pending_count}
     else:
         report["e2ee_sessions"] = {"active": 0, "pending": 0}
