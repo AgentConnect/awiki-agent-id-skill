@@ -1,8 +1,8 @@
 """E2EE 状态持久化：保存/加载 E2eeClient 状态到本地文件。
 
-[INPUT]: E2eeClient.export_state() 生成的 dict
+[INPUT]: E2eeClient.export_state() 生成的 dict（HPKE 方案，含 version="hpke_v1"）
 [OUTPUT]: save_e2ee_state(), load_e2ee_state(), delete_e2ee_state()
-[POS]: E2EE 会话状态持久化模块，支持跨进程 E2EE 握手与加密通信
+[POS]: E2EE 会话状态持久化模块，支持跨进程 HPKE E2EE 加密通信
 
 [PROTOCOL]:
 1. 逻辑变更时同步更新此头部

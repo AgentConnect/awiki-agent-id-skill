@@ -2,7 +2,8 @@
 
 [INPUT]: hostname, path_prefix, proof_purpose, domain, services
 [OUTPUT]: DIDIdentity, create_identity(), load_private_key()
-[POS]: 封装 ANP 的 create_did_wba_document_with_key_binding()，提供 key-bound DID 身份创建能力
+[POS]: 封装 ANP 的 create_did_wba_document_with_key_binding()，提供 key-bound DID 身份创建能力；
+       enable_e2ee=True 时同时生成 key-2 (secp256r1 签名) 和 key-3 (X25519 协商) 密钥
 
 [PROTOCOL]:
 1. 逻辑变更时同步更新此头部
@@ -31,6 +32,10 @@ class DIDIdentity:
     public_key_pem: bytes  # PEM 编码的公钥
     user_id: str | None = field(default=None)  # 注册后填充
     jwt_token: str | None = field(default=None)  # WBA 认证后填充
+    e2ee_signing_private_pem: bytes | None = field(default=None)   # key-2 secp256r1
+    e2ee_signing_public_pem: bytes | None = field(default=None)
+    e2ee_agreement_private_pem: bytes | None = field(default=None) # key-3 X25519
+    e2ee_agreement_public_pem: bytes | None = field(default=None)
 
     @property
     def unique_id(self) -> str:
@@ -86,11 +91,25 @@ def create_identity(
 
     private_key_pem, public_key_pem = keys["key-1"]
 
+    # E2EE 密钥（enable_e2ee=True 时 ANP 默认生成）
+    e2ee_signing_private_pem: bytes | None = None
+    e2ee_signing_public_pem: bytes | None = None
+    e2ee_agreement_private_pem: bytes | None = None
+    e2ee_agreement_public_pem: bytes | None = None
+    if "key-2" in keys:
+        e2ee_signing_private_pem, e2ee_signing_public_pem = keys["key-2"]
+    if "key-3" in keys:
+        e2ee_agreement_private_pem, e2ee_agreement_public_pem = keys["key-3"]
+
     return DIDIdentity(
         did=did_document["id"],
         did_document=did_document,
         private_key_pem=private_key_pem,
         public_key_pem=public_key_pem,
+        e2ee_signing_private_pem=e2ee_signing_private_pem,
+        e2ee_signing_public_pem=e2ee_signing_public_pem,
+        e2ee_agreement_private_pem=e2ee_agreement_private_pem,
+        e2ee_agreement_public_pem=e2ee_agreement_public_pem,
     )
 
 

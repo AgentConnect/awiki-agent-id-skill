@@ -1,26 +1,24 @@
-"""E2EE 端到端加密消息收发（支持跨进程状态持久化）。
+"""E2EE 端到端加密消息收发（HPKE 方案，支持跨进程状态持久化）。
 
 用法：
-    # 发起 E2EE 握手
+    # 发起 E2EE 会话（一步初始化，会话立即 ACTIVE）
     uv run python scripts/e2ee_messaging.py --handshake "did:wba:awiki.ai:user:abc123"
 
-    # 发送加密消息（需要先完成握手）
+    # 发送加密消息（需要先完成初始化）
     uv run python scripts/e2ee_messaging.py --send "did:wba:awiki.ai:user:abc123" --content "secret message"
 
-    # 处理收件箱中的 E2EE 消息（握手响应 + 解密）
+    # 处理收件箱中的 E2EE 消息（自动处理 init + 解密）
     uv run python scripts/e2ee_messaging.py --process --peer "did:wba:awiki.ai:user:abc123"
 
 支持的工作流：
-1. Alice: --handshake <Bob's DID>       → 发起握手
-2. Bob:   --process --peer <Alice's DID> → 处理收件箱（自动创建 E2eeClient + 回复握手）
-3. Alice: --process --peer <Bob's DID>   → 处理收件箱（完成握手，状态自动持久化）
-4. Bob:   --process --peer <Alice's DID> → 处理收件箱（激活会话，状态自动持久化）
-5. Alice: --send <Bob's DID> --content "secret" → 从磁盘恢复会话，发送加密消息
-6. Bob:   --process --peer <Alice's DID> → 从磁盘恢复会话，解密消息
+1. Alice: --handshake <Bob's DID>       → 发起会话（一步初始化，立即 ACTIVE）
+2. Bob:   --process --peer <Alice's DID> → 处理收件箱（收到 e2ee_init，会话直接 ACTIVE）
+3. Alice: --send <Bob's DID> --content "secret" → 发送加密消息
+4. Bob:   --process --peer <Alice's DID> → 从磁盘恢复会话，解密消息
 
 [INPUT]: SDK（E2eeClient、RPC 调用）、credential_store（加载身份凭证）、e2ee_store（E2EE 状态持久化）
 [OUTPUT]: E2EE 操作结果
-[POS]: 端到端加密消息脚本，集成状态持久化支持跨进程 E2EE 通信
+[POS]: 端到端加密消息脚本，集成状态持久化支持跨进程 E2EE 通信（HPKE 方案）
 
 [PROTOCOL]:
 1. 逻辑变更时同步更新此头部
@@ -35,31 +33,48 @@ from pathlib import Path
 from typing import Any
 
 from utils import SDKConfig, E2eeClient, create_molt_message_client, authenticated_rpc_call
-from credential_store import create_authenticator
+from credential_store import create_authenticator, load_identity
 from e2ee_store import save_e2ee_state, load_e2ee_state
 
 
 MESSAGE_RPC = "/message/rpc"
 
 # E2EE 相关消息类型
-_E2EE_MSG_TYPES = {"e2ee_hello", "e2ee_finished", "e2ee", "e2ee_error"}
+_E2EE_MSG_TYPES = {"e2ee_init", "e2ee_msg", "e2ee_rekey", "e2ee_error"}
 
 # E2EE 消息类型的协议顺序
-_E2EE_TYPE_ORDER = {"e2ee_hello": 0, "e2ee_finished": 1, "e2ee": 2, "e2ee_error": 3}
+_E2EE_TYPE_ORDER = {"e2ee_init": 0, "e2ee_rekey": 1, "e2ee_msg": 2, "e2ee_error": 3}
 
 
 def _load_or_create_e2ee_client(
     local_did: str, credential_name: str
 ) -> E2eeClient:
-    """从磁盘加载已有 E2EE 客户端状态，不存在时创建新客户端。"""
+    """从磁盘加载已有 E2EE 客户端状态，不存在时创建新客户端。
+
+    从凭证中加载 E2EE 密钥（signing_pem + x25519_pem）。
+    """
+    # 从凭证加载 E2EE 密钥
+    cred = load_identity(credential_name)
+    signing_pem: str | None = None
+    x25519_pem: str | None = None
+    if cred is not None:
+        signing_pem = cred.get("e2ee_signing_private_pem")
+        x25519_pem = cred.get("e2ee_agreement_private_pem")
+
+    if signing_pem is None or x25519_pem is None:
+        print("警告: 凭证缺少 E2EE 密钥（key-2/key-3），请重新创建身份以启用 HPKE E2EE")
+
     state = load_e2ee_state(credential_name)
     if state is not None and state.get("local_did") == local_did:
+        # 用凭证中的密钥覆盖状态中的（确保使用最新密钥）
+        if signing_pem is not None:
+            state["signing_pem"] = signing_pem
+        if x25519_pem is not None:
+            state["x25519_pem"] = x25519_pem
         client = E2eeClient.from_state(state)
         return client
-    # 尝试复用已有的 signing_pem
-    if state is not None and state.get("signing_pem"):
-        return E2eeClient(local_did, signing_pem=state["signing_pem"])
-    return E2eeClient(local_did)
+
+    return E2eeClient(local_did, signing_pem=signing_pem, x25519_pem=x25519_pem)
 
 
 def _save_e2ee_client(client: E2eeClient, credential_name: str) -> None:
@@ -89,7 +104,7 @@ async def initiate_handshake(
     peer_did: str,
     credential_name: str = "default",
 ) -> None:
-    """发起 E2EE 握手。"""
+    """发起 E2EE 会话（一步初始化）。"""
     config = SDKConfig()
     auth_result = create_authenticator(credential_name, config)
     if auth_result is None:
@@ -98,7 +113,7 @@ async def initiate_handshake(
 
     auth, data = auth_result
     e2ee_client = _load_or_create_e2ee_client(data["did"], credential_name)
-    msg_type, content = e2ee_client.initiate_handshake(peer_did)
+    msg_type, content = await e2ee_client.initiate_handshake(peer_did)
 
     async with create_molt_message_client(config) as client:
         await _send_msg(client, data["did"], peer_did, msg_type, content,
@@ -106,10 +121,10 @@ async def initiate_handshake(
 
     _save_e2ee_client(e2ee_client, credential_name)
 
-    print(f"E2EE 握手已发起")
+    print(f"E2EE 会话已建立（一步初始化）")
     print(f"  session_id: {content.get('session_id')}")
     print(f"  peer_did  : {peer_did}")
-    print("接下来等待对方处理收件箱并响应握手")
+    print("会话已 ACTIVE，可以直接发送加密消息")
 
 
 async def send_encrypted(
@@ -129,7 +144,7 @@ async def send_encrypted(
 
     if not e2ee_client.has_active_session(peer_did):
         print(f"没有与 {peer_did} 的活跃 E2EE 会话")
-        print("请先完成握手流程")
+        print("请先发起 E2EE 会话: --handshake <DID>")
         sys.exit(1)
 
     enc_type, enc_content = e2ee_client.encrypt_message(peer_did, plaintext)
@@ -137,6 +152,9 @@ async def send_encrypted(
     async with create_molt_message_client(config) as client:
         await _send_msg(client, data["did"], peer_did, enc_type, enc_content,
                         auth=auth, credential_name=credential_name)
+
+    # 保存状态（send_seq 已递增）
+    _save_e2ee_client(e2ee_client, credential_name)
 
     print("加密消息已发送")
     print(f"  原文: {plaintext}")
@@ -176,9 +194,7 @@ async def process_inbox(
         e2ee_client: E2eeClient | None = None
 
         # 尝试从磁盘恢复已有 E2EE 客户端
-        saved_state = load_e2ee_state(credential_name)
-        if saved_state is not None and saved_state.get("local_did") == data["did"]:
-            e2ee_client = E2eeClient.from_state(saved_state)
+        e2ee_client = _load_or_create_e2ee_client(data["did"], credential_name)
         processed_ids = []
 
         for msg in messages:
@@ -188,25 +204,14 @@ async def process_inbox(
             if msg_type in _E2EE_MSG_TYPES:
                 content = json.loads(msg["content"])
 
-                if msg_type == "e2ee_hello" and e2ee_client is None:
-                    print(f"  [{msg_type}] 收到 E2EE 协商请求，创建 E2eeClient...")
-                    # 尝试复用已保存的 signing_pem
-                    if saved_state is not None and saved_state.get("signing_pem"):
-                        e2ee_client = E2eeClient(
-                            data["did"], signing_pem=saved_state["signing_pem"]
-                        )
-                    else:
-                        e2ee_client = E2eeClient(data["did"])
-
-                if e2ee_client is None:
-                    print(f"  [{msg_type}] 尚无 E2eeClient，跳过")
-                    continue
-
-                if msg_type == "e2ee":
-                    original_type, plaintext = e2ee_client.decrypt_message(content)
-                    print(f"  [{msg_type}] 解密消息: [{original_type}] {plaintext}")
+                if msg_type == "e2ee_msg":
+                    try:
+                        original_type, plaintext = e2ee_client.decrypt_message(content)
+                        print(f"  [{msg_type}] 解密消息: [{original_type}] {plaintext}")
+                    except RuntimeError as e:
+                        print(f"  [{msg_type}] 解密失败: {e}")
                 else:
-                    responses = e2ee_client.process_e2ee_message(msg_type, content)
+                    responses = await e2ee_client.process_e2ee_message(msg_type, content)
                     print(f"  [{msg_type}] 处理协议消息，生成 {len(responses)} 条响应")
                     for resp_type, resp_content in responses:
                         await _send_msg(
@@ -230,18 +235,16 @@ async def process_inbox(
 
         if e2ee_client and e2ee_client.has_active_session(peer_did):
             print(f"\nE2EE 会话状态: ACTIVE (与 {peer_did})")
-        elif e2ee_client:
-            print(f"\nE2EE 会话状态: 握手进行中")
 
-        # 保存 E2EE 客户端状态到磁盘（签名密钥 + ACTIVE 会话）
+        # 保存 E2EE 客户端状态到磁盘
         if e2ee_client is not None:
             _save_e2ee_client(e2ee_client, credential_name)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="E2EE 端到端加密消息")
+    parser = argparse.ArgumentParser(description="E2EE 端到端加密消息（HPKE 方案）")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--handshake", type=str, help="向指定 DID 发起 E2EE 握手")
+    group.add_argument("--handshake", type=str, help="向指定 DID 发起 E2EE 会话")
     group.add_argument("--send", type=str, help="向指定 DID 发送加密消息")
     group.add_argument("--process", action="store_true",
                        help="处理收件箱中的 E2EE 消息")

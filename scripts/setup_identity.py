@@ -87,6 +87,8 @@ async def create_new_identity(
             display_name=display_name or name,
             name=credential_name,
             did_document=identity.did_document,
+            e2ee_signing_private_pem=identity.e2ee_signing_private_pem,
+            e2ee_agreement_private_pem=identity.e2ee_agreement_private_pem,
         )
         print(f"\n凭证已保存到: {path}")
         print(f"凭证名称: {credential_name}")

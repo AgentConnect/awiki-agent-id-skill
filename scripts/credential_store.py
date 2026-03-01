@@ -46,6 +46,8 @@ def save_identity(
     display_name: str | None = None,
     name: str = "default",
     did_document: dict[str, Any] | None = None,
+    e2ee_signing_private_pem: bytes | None = None,
+    e2ee_agreement_private_pem: bytes | None = None,
 ) -> Path:
     """保存 DID 身份到本地文件。
 
@@ -59,6 +61,8 @@ def save_identity(
         display_name: 显示名称
         name: 凭证名称（默认 "default"）
         did_document: DID 文档（供 DIDWbaAuthHeader 使用）
+        e2ee_signing_private_pem: key-2 secp256r1 签名私钥 PEM
+        e2ee_agreement_private_pem: key-3 X25519 协商私钥 PEM
 
     Returns:
         凭证文件路径
@@ -76,6 +80,19 @@ def save_identity(
         "did_document": did_document,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+
+    if e2ee_signing_private_pem is not None:
+        credential_data["e2ee_signing_private_pem"] = (
+            e2ee_signing_private_pem.decode("utf-8")
+            if isinstance(e2ee_signing_private_pem, bytes)
+            else e2ee_signing_private_pem
+        )
+    if e2ee_agreement_private_pem is not None:
+        credential_data["e2ee_agreement_private_pem"] = (
+            e2ee_agreement_private_pem.decode("utf-8")
+            if isinstance(e2ee_agreement_private_pem, bytes)
+            else e2ee_agreement_private_pem
+        )
 
     path = _credential_path(name)
     path.write_text(json.dumps(credential_data, indent=2, ensure_ascii=False))
