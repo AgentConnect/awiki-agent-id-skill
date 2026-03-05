@@ -25,7 +25,7 @@ import json
 import sys
 from pathlib import Path
 
-from utils import SDKConfig, create_user_service_client, rpc_call, authenticated_rpc_call
+from utils import SDKConfig, create_user_service_client, rpc_call, authenticated_rpc_call, resolve_to_did
 from credential_store import create_authenticator
 
 
@@ -71,7 +71,7 @@ async def resolve_did(did: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="View DID Profile")
-    parser.add_argument("--did", type=str, help="View public Profile of a specific DID")
+    parser.add_argument("--did", type=str, help="View public Profile of a specific DID or handle")
     parser.add_argument("--resolve", type=str, help="Resolve a specific DID document")
     parser.add_argument("--credential", type=str, default="default",
                         help="Credential name (default: default)")
@@ -79,9 +79,11 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.resolve:
-        asyncio.run(resolve_did(args.resolve))
+        resolved_did = asyncio.run(resolve_to_did(args.resolve))
+        asyncio.run(resolve_did(resolved_did))
     elif args.did:
-        asyncio.run(get_public_profile(args.did))
+        target_did = asyncio.run(resolve_to_did(args.did))
+        asyncio.run(get_public_profile(target_did))
     else:
         asyncio.run(get_my_profile(args.credential))
 

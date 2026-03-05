@@ -32,7 +32,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from utils import SDKConfig, E2eeClient, create_molt_message_client, authenticated_rpc_call
+from utils import SDKConfig, E2eeClient, create_molt_message_client, authenticated_rpc_call, resolve_to_did
 from credential_store import create_authenticator, load_identity
 from e2ee_store import save_e2ee_state, load_e2ee_state
 
@@ -246,29 +246,32 @@ async def process_inbox(
 def main() -> None:
     parser = argparse.ArgumentParser(description="E2EE end-to-end encrypted messaging (HPKE scheme)")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--handshake", type=str, help="Initiate E2EE session with a specific DID")
-    group.add_argument("--send", type=str, help="Send encrypted message to a specific DID")
+    group.add_argument("--handshake", type=str, help="Initiate E2EE session with a specific DID or handle")
+    group.add_argument("--send", type=str, help="Send encrypted message to a specific DID or handle")
     group.add_argument("--process", action="store_true",
                        help="Process E2EE messages in inbox")
 
     parser.add_argument("--content", type=str, help="Message content (required with --send)")
     parser.add_argument("--peer", type=str,
-                        help="Peer DID (required with --process)")
+                        help="Peer DID or handle (required with --process)")
     parser.add_argument("--credential", type=str, default="default",
                         help="Credential name (default: default)")
 
     args = parser.parse_args()
 
     if args.handshake:
-        asyncio.run(initiate_handshake(args.handshake, args.credential))
+        peer_did = asyncio.run(resolve_to_did(args.handshake))
+        asyncio.run(initiate_handshake(peer_did, args.credential))
     elif args.send:
         if not args.content:
             parser.error("Sending encrypted message requires --content")
-        asyncio.run(send_encrypted(args.send, args.content, args.credential))
+        peer_did = asyncio.run(resolve_to_did(args.send))
+        asyncio.run(send_encrypted(peer_did, args.content, args.credential))
     elif args.process:
         if not args.peer:
             parser.error("Processing inbox requires --peer")
-        asyncio.run(process_inbox(args.peer, args.credential))
+        peer_did = asyncio.run(resolve_to_did(args.peer))
+        asyncio.run(process_inbox(peer_did, args.credential))
 
 
 if __name__ == "__main__":

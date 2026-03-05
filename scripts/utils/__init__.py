@@ -22,6 +22,7 @@ from utils.client import create_user_service_client, create_molt_message_client
 from utils.e2ee import E2eeClient
 from utils.rpc import JsonRpcError, rpc_call, authenticated_rpc_call
 from utils.ws import WsClient
+from utils.resolve import resolve_to_did
 
 __all__ = [
     # config
@@ -46,4 +47,6 @@ __all__ = [
     "authenticated_rpc_call",
     # ws
     "WsClient",
+    # resolve
+    "resolve_to_did",
 ]

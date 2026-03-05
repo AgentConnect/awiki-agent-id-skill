@@ -31,7 +31,7 @@ import json
 import sys
 from pathlib import Path
 
-from utils import SDKConfig, create_user_service_client, authenticated_rpc_call
+from utils import SDKConfig, create_user_service_client, authenticated_rpc_call, resolve_to_did
 from credential_store import create_authenticator
 
 
@@ -141,9 +141,9 @@ async def get_followers(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Social relationship management")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--follow", type=str, help="Follow a specific DID")
-    group.add_argument("--unfollow", type=str, help="Unfollow a specific DID")
-    group.add_argument("--status", type=str, help="View relationship status with a specific DID")
+    group.add_argument("--follow", type=str, help="Follow a specific DID or handle")
+    group.add_argument("--unfollow", type=str, help="Unfollow a specific DID or handle")
+    group.add_argument("--status", type=str, help="View relationship status with a specific DID or handle")
     group.add_argument("--following", action="store_true", help="View following list")
     group.add_argument("--followers", action="store_true", help="View followers list")
 
@@ -157,11 +157,14 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.follow:
-        asyncio.run(follow(args.follow, args.credential))
+        target_did = asyncio.run(resolve_to_did(args.follow))
+        asyncio.run(follow(target_did, args.credential))
     elif args.unfollow:
-        asyncio.run(unfollow(args.unfollow, args.credential))
+        target_did = asyncio.run(resolve_to_did(args.unfollow))
+        asyncio.run(unfollow(target_did, args.credential))
     elif args.status:
-        asyncio.run(get_status(args.status, args.credential))
+        target_did = asyncio.run(resolve_to_did(args.status))
+        asyncio.run(get_status(target_did, args.credential))
     elif args.following:
         asyncio.run(get_following(args.credential, args.limit, args.offset))
     elif args.followers:
