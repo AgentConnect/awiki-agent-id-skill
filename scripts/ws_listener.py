@@ -362,10 +362,18 @@ async def listen_loop(
                                 continue
 
                             if msg_type == "e2ee_msg":
-                                decrypted = await e2ee_handler.decrypt_message(params)
-                                if decrypted is None:
+                                result = await e2ee_handler.decrypt_message(params)
+                                if result.error_responses:
+                                    for resp_type, resp_content in result.error_responses:
+                                        await ws.send_message(
+                                            receiver_did=sender_did,
+                                            content=json.dumps(resp_content),
+                                            msg_type=resp_type,
+                                        )
+                                if result.params is None:
+                                    await e2ee_handler.maybe_save_state()
                                     continue
-                                params = decrypted
+                                params = result.params
                                 await e2ee_handler.maybe_save_state()
 
                         # Original routing logic

@@ -142,14 +142,16 @@ async def send_encrypted(
     auth, data = auth_result
     e2ee_client = _load_or_create_e2ee_client(data["did"], credential_name)
 
-    if not e2ee_client.has_active_session(peer_did):
-        print(f"No active E2EE session with {peer_did}")
-        print("Please initiate an E2EE session first: --handshake <DID>")
-        sys.exit(1)
-
-    enc_type, enc_content = e2ee_client.encrypt_message(peer_did, plaintext)
+    # Auto-handshake if session is missing or expired
+    init_msgs = await e2ee_client.ensure_active_session(peer_did)
 
     async with create_molt_message_client(config) as client:
+        for init_type, init_content in init_msgs:
+            await _send_msg(client, data["did"], peer_did, init_type, init_content,
+                            auth=auth, credential_name=credential_name)
+            print(f"Session expired/missing, auto re-handshake sent to {peer_did}")
+
+        enc_type, enc_content = e2ee_client.encrypt_message(peer_did, plaintext)
         await _send_msg(client, data["did"], peer_did, enc_type, enc_content,
                         auth=auth, credential_name=credential_name)
 

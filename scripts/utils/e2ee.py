@@ -167,7 +167,7 @@ class E2eeClient:
         elif detected == MessageType.E2EE_REKEY:
             return await self._handle_rekey(content)
         elif detected == MessageType.E2EE_ERROR:
-            return self._handle_error(content)
+            return await self._handle_error(content)
         elif detected == MessageType.E2EE_MSG:
             logger.warning("process_e2ee_message does not handle encrypted messages, use decrypt_message instead")
             return []
@@ -179,6 +179,31 @@ class E2eeClient:
         """Check whether an active encryption session exists with the specified peer."""
         session = self._key_manager.get_active_session(self.local_did, peer_did)
         return session is not None
+
+    async def ensure_active_session(
+        self, peer_did: str
+    ) -> list[tuple[str, dict[str, Any]]]:
+        """Ensure an active session exists with the peer, auto-handshake if needed.
+
+        If a valid session already exists, returns an empty list.
+        If the session is missing or expired, initiates a new handshake and returns
+        the handshake message(s) that must be sent to the peer.
+
+        Args:
+            peer_did: Peer DID identifier.
+
+        Returns:
+            List of ``(msg_type, content_dict)`` messages to send (empty if session
+            is already active, ``[("e2ee_init", ...)]`` if a handshake was initiated).
+
+        Raises:
+            RuntimeError: Missing required keys or unable to retrieve peer DID document.
+        """
+        if self.has_active_session(peer_did):
+            return []
+        msg_type, content = await self.initiate_handshake(peer_did)
+        logger.info("Auto-handshake initiated for expired/missing session: peer=%s", peer_did[:20])
+        return [(msg_type, content)]
 
     def encrypt_message(
         self, peer_did: str, plaintext: str, original_type: str = "text"
@@ -477,19 +502,33 @@ class E2eeClient:
         )
         return []
 
-    def _handle_error(
+    async def _handle_error(
         self, content: dict[str, Any]
     ) -> list[tuple[str, dict[str, Any]]]:
-        """Handle E2EE Error: log and remove the corresponding session."""
+        """Handle E2EE Error: log, remove the corresponding session, and auto re-handshake for recoverable errors."""
         error_code = content.get("error_code", "unknown")
         session_id = content.get("session_id", "")
         logger.warning(
             "Received E2EE error: code=%s, session_id=%s", error_code, session_id
         )
+        peer_did: str | None = None
         if session_id:
             session = self._key_manager.get_session_by_id(session_id)
             if session is not None:
+                peer_did = session.peer_did
                 self._key_manager.remove_session(session.local_did, session.peer_did)
+
+        # Auto re-handshake for recoverable errors
+        _recoverable = {"session_not_found", "session_expired", "decryption_failed"}
+        if error_code in _recoverable and peer_did is not None:
+            try:
+                msg_type, init_content = await self.initiate_handshake(peer_did)
+                logger.info(
+                    "Auto re-handshake initiated after E2EE error: peer=%s", peer_did[:20]
+                )
+                return [(msg_type, init_content)]
+            except Exception:
+                logger.exception("Auto re-handshake failed: peer=%s", peer_did)
         return []
 
 
