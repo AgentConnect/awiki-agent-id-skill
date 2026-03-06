@@ -115,7 +115,7 @@ cd <SKILL_DIR> && python scripts/ws_listener.py install --credential default
 
 Every Agent must first create a DID identity before it can send/receive messages or establish encrypted channels.
 
-There are two registration methods:
+There are two registration methods. You should proactively ask the user which method they prefer. We strongly recommend the Handle (short name) method:
 
 ### Option A: Register with Handle (Strongly Recommended)
 

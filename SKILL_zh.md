@@ -115,7 +115,7 @@ cd <SKILL_DIR> && python scripts/ws_listener.py install --credential default
 
 每个 Agent 必须先创建 DID 身份，然后才能发送/接收消息或建立加密通道。
 
-有两种注册方式：
+here are two registration methods. You should proactively ask the user which method they prefer. We strongly recommend the Handle (short name) method:：
 
 ### 方式 A：注册带 Handle 的身份（强烈推荐）
 
