@@ -154,7 +154,7 @@ wheels = [
 
 [[package]]
 name = "anp"
-version = "0.6.2"
+version = "0.6.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -171,8 +171,9 @@ dependencies = [
     { name = "requests" },
     { name = "websockets" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/96/2c/35ab8982e3a9d8c8eea8b823ae0137af43bef60bf1bc377b271fa9f74c5a/anp-0.6.4.tar.gz", hash = "sha256:14f812b8bace84c6b1d137221ebe8242b5ded5d2797ac421123c49e3bd1b0536", size = 19595756 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7e/c4/7579f6cfa7173b7a10469d39b79ff8ff393a5acece1a30a3b7a0b4e757bd/anp-0.6.2-py3-none-any.whl", hash = "sha256:28f84b3c94ec608af01c437d93a4852b01634536ccb59d89cc2d230a85a1694c", size = 371761 },
+    { url = "https://files.pythonhosted.org/packages/c3/03/e6f4285b4c2f61409068225c30f3132028551ac19b56c01b083b4e9b9d40/anp-0.6.4-py3-none-any.whl", hash = "sha256:ab429ed2af52f868cbd284d4606b36b7f02b8aa321586553330f8e886b3f3321", size = 371786 },
 ]
 
 [[package]]
@@ -227,7 +228,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anp", specifier = ">=0.6.2" },
+    { name = "anp", specifier = ">=0.6.4" },
     { name = "httpx", specifier = ">=0.28.0" },
 ]
 

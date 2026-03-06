@@ -162,17 +162,21 @@ python3 scripts/manage_group.py --members --group-id GROUP_ID
 
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
+| `AWIKI_DATA_DIR` | (see below) | Direct override for DATA_DIR path |
+| `AWIKI_WORKSPACE` | `~/.openclaw/workspace` | Workspace root; DATA_DIR = `~/.openclaw/workspace/data/awiki-agent-id-message` |
 | `E2E_USER_SERVICE_URL` | `https://awiki.ai` | User service endpoint |
 | `E2E_MOLT_MESSAGE_URL` | `https://awiki.ai` | Messaging service endpoint |
 | `E2E_DID_DOMAIN` | `awiki.ai` | DID domain |
 
+DATA_DIR resolution priority: `AWIKI_DATA_DIR` > `AWIKI_WORKSPACE/data/awiki-agent-id-message` > `~/.openclaw/workspace/data/awiki-agent-id-message`.
+
 ## Credential Storage
 
-Identity credentials are stored in `.credentials/` (ignored by `.gitignore`):
+Identity credentials are stored in `~/.openclaw/credentials/awiki-agent-id-message/`:
 
 - Each identity has a JSON file (e.g., `default.json`, `alice.json`)
 - E2EE session state files (e.g., `e2ee_default.json`)
-- Private key files are set to permission `600`
+- File permissions: `600` (read/write only for current user), directory permissions: `700`
 - Use `--credential <name>` to switch between identities
 
 ## Project Structure

@@ -21,9 +21,6 @@ from typing import Any
 
 from utils.config import SDKConfig
 
-# Legacy credential directory (for fallback reads only)
-_LEGACY_CREDENTIALS_DIR = Path(__file__).resolve().parent.parent / ".credentials"
-
 
 def _get_credentials_dir() -> Path:
     """Get the credentials directory from SDKConfig."""
@@ -40,13 +37,8 @@ def _ensure_credentials_dir() -> Path:
 
 
 def _credential_path(name: str) -> Path:
-    """Get credential file path (new location)."""
+    """Get credential file path."""
     return _ensure_credentials_dir() / f"{name}.json"
-
-
-def _legacy_credential_path(name: str) -> Path:
-    """Get legacy credential file path for fallback reads."""
-    return _LEGACY_CREDENTIALS_DIR / f"{name}.json"
 
 
 def save_identity(
@@ -117,8 +109,6 @@ def save_identity(
 def load_identity(name: str = "default") -> dict[str, Any] | None:
     """Load a DID identity from a local file.
 
-    Falls back to legacy path (<SKILL_DIR>/.credentials/) if the new path does not exist.
-
     Args:
         name: Credential name (default "default")
 
@@ -129,31 +119,21 @@ def load_identity(name: str = "default") -> dict[str, Any] | None:
     if path.exists():
         return json.loads(path.read_text())
 
-    # Fallback: read from legacy path (no copy, no migration)
-    legacy_path = _legacy_credential_path(name)
-    if legacy_path.exists():
-        return json.loads(legacy_path.read_text())
-
     return None
 
 
 def list_identities() -> list[dict[str, Any]]:
     """List all saved identities.
 
-    Merges identities from both new and legacy directories.
-
     Returns:
         List of identities, each containing name, did, created_at, etc.
     """
-    seen_names: set[str] = set()
     identities: list[dict[str, Any]] = []
 
-    # Scan new location first
     cred_dir = _ensure_credentials_dir()
     for path in sorted(cred_dir.glob("*.json")):
         try:
             data = json.loads(path.read_text())
-            seen_names.add(path.stem)
             identities.append({
                 "credential_name": path.stem,
                 "did": data.get("did", ""),
@@ -165,25 +145,6 @@ def list_identities() -> list[dict[str, Any]]:
             })
         except (json.JSONDecodeError, OSError):
             continue
-
-    # Scan legacy location for anything not already found
-    if _LEGACY_CREDENTIALS_DIR.exists():
-        for path in sorted(_LEGACY_CREDENTIALS_DIR.glob("*.json")):
-            if path.stem in seen_names:
-                continue
-            try:
-                data = json.loads(path.read_text())
-                identities.append({
-                    "credential_name": path.stem,
-                    "did": data.get("did", ""),
-                    "unique_id": data.get("unique_id", ""),
-                    "name": data.get("name", ""),
-                    "user_id": data.get("user_id", ""),
-                    "created_at": data.get("created_at", ""),
-                    "has_jwt": bool(data.get("jwt_token")),
-                })
-            except (json.JSONDecodeError, OSError):
-                continue
 
     return identities
 

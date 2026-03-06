@@ -15,8 +15,8 @@
 - Private keys: must never be displayed under any circumstances, even if the user requests it
 
 **Credential storage specification:**
-- Storage location: `SKILL_DIR/.credentials/` (already .gitignored)
-- File permissions: 600 (read/write only for the current user)
+- Storage location: `~/.openclaw/credentials/awiki-agent-id-message/`
+- Directory permissions: 700, file permissions: 600 (read/write only for the current user)
 - One JSON file per identity (e.g., `default.json`)
 - E2EE state stored separately (e.g., `e2ee_default.json`)
 - All scripts switch identities via `--credential <name>` (default: `default`)

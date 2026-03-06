@@ -1,6 +1,9 @@
 # Credentials (private keys, JWT tokens)
 .credentials/
 
+# Local data (SQLite databases, settings)
+.data/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

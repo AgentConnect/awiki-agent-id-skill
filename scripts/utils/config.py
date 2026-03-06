@@ -19,7 +19,7 @@ from pathlib import Path
 # Skill name used for path construction
 _SKILL_NAME = "awiki-agent-id-message"
 
-# SKILL_DIR: project root (two levels up from utils/config.py), used for legacy fallback only
+# SKILL_DIR: project root (two levels up from utils/config.py)
 _SKILL_DIR = Path(__file__).resolve().parent.parent.parent
 
 

@@ -19,9 +19,6 @@ from typing import Any
 
 from utils.config import SDKConfig
 
-# Legacy credential directory (for fallback reads only)
-_LEGACY_CREDENTIALS_DIR = Path(__file__).resolve().parent.parent / ".credentials"
-
 
 def _get_credentials_dir() -> Path:
     """Get the credentials directory from SDKConfig."""
@@ -37,13 +34,8 @@ def _ensure_credentials_dir() -> Path:
 
 
 def _e2ee_state_path(credential_name: str) -> Path:
-    """Get E2EE state file path (new location)."""
+    """Get E2EE state file path."""
     return _ensure_credentials_dir() / f"e2ee_{credential_name}.json"
-
-
-def _legacy_e2ee_state_path(credential_name: str) -> Path:
-    """Get legacy E2EE state file path for fallback reads."""
-    return _LEGACY_CREDENTIALS_DIR / f"e2ee_{credential_name}.json"
 
 
 def save_e2ee_state(state: dict[str, Any], credential_name: str = "default") -> Path:
@@ -65,8 +57,6 @@ def save_e2ee_state(state: dict[str, Any], credential_name: str = "default") -> 
 def load_e2ee_state(credential_name: str = "default") -> dict[str, Any] | None:
     """Load E2EE client state from a local file.
 
-    Falls back to legacy path (<SKILL_DIR>/.credentials/) if the new path does not exist.
-
     Args:
         credential_name: Credential name (default ``"default"``).
 
@@ -76,11 +66,6 @@ def load_e2ee_state(credential_name: str = "default") -> dict[str, Any] | None:
     path = _e2ee_state_path(credential_name)
     if path.exists():
         return json.loads(path.read_text())
-
-    # Fallback: read from legacy path (no copy, no migration)
-    legacy_path = _legacy_e2ee_state_path(credential_name)
-    if legacy_path.exists():
-        return json.loads(legacy_path.read_text())
 
     return None
 

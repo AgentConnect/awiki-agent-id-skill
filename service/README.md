@@ -18,21 +18,25 @@ All platforms share the same CLI interface — `ws_listener.py install/uninstall
 
 | File | Description |
 |------|-------------|
-| `listener.example.json` | Routing rules configuration example — copy and customize |
+| `listener.example.json` | Legacy routing rules configuration example |
+| `settings.example.json` | Unified configuration template (service URLs + listener config) |
+
+Configuration is loaded from `<DATA_DIR>/config/settings.json` by default. See `settings.example.json` for the full template.
 
 ## Quick Start
 
 ### 1. Prepare Configuration
 
 ```bash
-cp service/listener.example.json service/listener.json
-# Edit listener.json — set webhook_token, whitelist_dids, etc.
+# Copy the unified config template to your DATA_DIR
+cp service/settings.example.json <DATA_DIR>/config/settings.json
+# Edit settings.json — set webhook_token, whitelist_dids, etc.
 ```
 
 ### 2. Install and Start
 
 ```bash
-python scripts/ws_listener.py install --credential default --config service/listener.json
+python scripts/ws_listener.py install --credential default --mode smart
 ```
 
 ### 3. Verify
@@ -47,8 +51,8 @@ python scripts/ws_listener.py status
 # Install and start the service
 python scripts/ws_listener.py install --credential default --mode smart
 
-# Install with a custom config file
-python scripts/ws_listener.py install --credential default --config service/listener.json
+# Install with a custom config file (overrides settings.json)
+python scripts/ws_listener.py install --credential default --config path/to/config.json
 
 # Check service status
 python scripts/ws_listener.py status

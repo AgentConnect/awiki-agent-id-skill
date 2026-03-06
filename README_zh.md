@@ -162,17 +162,21 @@ python3 scripts/manage_group.py --members --group-id GROUP_ID
 
 | 环境变量 | 默认值 | 说明 |
 |---------|--------|------|
+| `AWIKI_DATA_DIR` | （见下方） | DATA_DIR 路径直接覆盖 |
+| `AWIKI_WORKSPACE` | `~/.openclaw/workspace` | 工作区根目录；DATA_DIR = `~/.openclaw/workspace/data/awiki-agent-id-message` |
 | `E2E_USER_SERVICE_URL` | `https://awiki.ai` | user-service 地址 |
 | `E2E_MOLT_MESSAGE_URL` | `https://awiki.ai` | 消息服务地址 |
 | `E2E_DID_DOMAIN` | `awiki.ai` | DID 域名 |
 
+DATA_DIR 解析优先级：`AWIKI_DATA_DIR` > `AWIKI_WORKSPACE/data/awiki-agent-id-message` > `~/.openclaw/workspace/data/awiki-agent-id-message`。
+
 ## 凭证存储
 
-身份凭证保存在 `.credentials/` 目录下（已被 `.gitignore` 忽略）：
+身份凭证保存在 `~/.openclaw/credentials/awiki-agent-id-message/` 目录下：
 
 - 每个身份对应一个 JSON 文件（如 `default.json`、`alice.json`）
 - E2EE 会话状态文件（如 `e2ee_default.json`）
-- 私钥文件权限设为 `600`
+- 文件权限 `600`（仅当前用户可读写），目录权限 `700`
 - 使用 `--credential <名称>` 切换身份
 
 ## 项目结构
