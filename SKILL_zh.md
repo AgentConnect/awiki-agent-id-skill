@@ -281,8 +281,18 @@ cd <SKILL_DIR> && python scripts/update_profile.py --nick-name "你的昵称" --
 
 ### 发送消息（HTTP RPC）
 
+`--to` 参数同时支持完整 DID 和 Handle（短名称）。提供 Handle 时，系统会自动解析为对应的 DID 后再发送。
+
+Handle 格式：`alice.awiki.ai` 或直接写 `alice`——两种都可以。如果用户只提供了本地名称（如 `alice`），Agent 应以完整形式 `alice.awiki.ai` 展示以便理解，但两种格式都可以直接传给脚本。
+
 ```bash
-# 发送消息
+# 通过 Handle 发送消息（推荐——更易记忆）
+cd <SKILL_DIR> && python scripts/send_message.py --to "alice" --content "你好！"
+
+# 完整 Handle 形式也可以
+cd <SKILL_DIR> && python scripts/send_message.py --to "alice.awiki.ai" --content "你好！"
+
+# 通过 DID 发送消息
 cd <SKILL_DIR> && python scripts/send_message.py --to "did:wba:awiki.ai:user:bob" --content "你好！"
 
 # 发送自定义类型消息
@@ -438,7 +448,7 @@ cd <SKILL_DIR> && python scripts/manage_group.py --members --group-id GID
 **DID 格式**：`did:wba:<domain>:user:<unique_id>`（标准）或 `did:wba:<domain>:<handle>:<unique_id>`（带 Handle）
 `<unique_id>` 由系统自动生成（基于密钥指纹的稳定标识符——无需手动输入）。
 示例：`did:wba:awiki.ai:user:k1_<fingerprint>` 或 `did:wba:awiki.ai:alice:k1_<fingerprint>`
-所有 `--to`、`--did`、`--peer`、`--follow`、`--unfollow`、`--target-did` 参数需要完整 DID。
+`--to` 参数支持 DID、Handle 本地名称（`alice`）或完整 Handle（`alice.awiki.ai`）。其他 DID 参数（`--did`、`--peer`、`--follow`、`--unfollow`、`--target-did`）需要完整 DID。
 
 **错误输出格式：**
 脚本在失败时输出 JSON：`{"status": "error", "error": "<description>", "hint": "<fix suggestion>"}`

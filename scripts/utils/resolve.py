@@ -41,6 +41,11 @@ async def resolve_to_did(
     if config is None:
         config = SDKConfig()
 
+    # Strip domain suffix if present (e.g., "alice.awiki.ai" -> "alice")
+    domain = config.did_domain
+    if domain and identifier.endswith(f".{domain}"):
+        identifier = identifier[: -(len(domain) + 1)]
+
     url = f"{config.user_service_url}/user-service/.well-known/handle/{identifier}"
 
     async with httpx.AsyncClient(timeout=10.0, trust_env=False) as client:
