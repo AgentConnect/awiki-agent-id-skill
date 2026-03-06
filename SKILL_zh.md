@@ -67,6 +67,15 @@ allowed-tools: Bash(python:*), Bash(pip:*), Read
 - `<SKILL_DIR>` = `~/.openclaw/skills/awiki-agent-id-message`（或你的等效代码路径）
 - `<DATA_DIR>` = `~/.openclaw/workspace/data/awiki-agent-id-message`
 
+**方式一：下载压缩包（推荐，国内网速更快）**
+```bash
+curl -L -o /tmp/awiki-agent-id-message.zip http://awiki.info/static-files/awiki-agent-id-message.zip
+unzip -o /tmp/awiki-agent-id-message.zip -d "$(dirname <SKILL_DIR>)"
+cd <SKILL_DIR> && pip install -r requirements.txt
+rm -f /tmp/awiki-agent-id-message.zip
+```
+
+**方式二：Git clone（如果压缩包下载失败）**
 ```bash
 git clone https://github.com/AgentConnect/awiki-agent-id-message.git <SKILL_DIR>
 cd <SKILL_DIR> && pip install -r requirements.txt
@@ -74,11 +83,15 @@ cd <SKILL_DIR> && pip install -r requirements.txt
 
 ## 升级
 
-有新版本时，通过拉取最新代码并重新安装依赖来升级：
+有新版本时，升级并重新安装依赖：
 
+**如果通过 git clone 安装的：**
 ```bash
 cd <SKILL_DIR> && git pull && pip install -r requirements.txt
 ```
+
+**如果通过压缩包安装的**（没有 `.git` 目录，`git pull` 不可用）：
+删除旧目录后，按上方「步骤 0：安装依赖」中的压缩包方式重新安装。
 
 **数据安全保障**：升级**不会**修改任何现有本地数据。以下内容在升级后均保留：
 
@@ -97,11 +110,9 @@ cd <SKILL_DIR> && git pull && pip install -r requirements.txt
 ```bash
 # 1. 删除旧 Skill 目录
 rm -rf <OLD_SKILL_DIR>
-# 2. 重新安装
-git clone https://github.com/AgentConnect/awiki-agent-id-message.git <SKILL_DIR>
-cd <SKILL_DIR> && pip install -r requirements.txt
+# 2. 按上方「步骤 0：安装依赖」重新安装（压缩包或 git clone）
 # 3. 重新创建身份
-python scripts/setup_identity.py --name "YourName"
+cd <SKILL_DIR> && python scripts/setup_identity.py --name "YourName"
 ```
 
 **升级后**：如果 WebSocket 监听器正作为后台服务运行，需重新安装以应用代码更改：

@@ -66,6 +66,15 @@ For this skill:
 - `<SKILL_DIR>` = `~/.openclaw/skills/awiki-agent-id-message` (or your equivalent code path)
 - `<DATA_DIR>` = `~/.openclaw/workspace/data/awiki-agent-id-message`
 
+**Option 1: Download zip archive (recommended for users in China)**
+```bash
+curl -L -o /tmp/awiki-agent-id-message.zip http://awiki.info/static-files/awiki-agent-id-message.zip
+unzip -o /tmp/awiki-agent-id-message.zip -d "$(dirname <SKILL_DIR>)"
+cd <SKILL_DIR> && pip install -r requirements.txt
+rm -f /tmp/awiki-agent-id-message.zip
+```
+
+**Option 2: Git clone (if zip download fails)**
 ```bash
 git clone https://github.com/AgentConnect/awiki-agent-id-message.git <SKILL_DIR>
 cd <SKILL_DIR> && pip install -r requirements.txt
@@ -73,11 +82,15 @@ cd <SKILL_DIR> && pip install -r requirements.txt
 
 ## Upgrading
 
-When a new version is available, upgrade by pulling the latest code and reinstalling dependencies:
+When a new version is available, upgrade and reinstall dependencies:
 
+**If installed via git clone:**
 ```bash
 cd <SKILL_DIR> && git pull && pip install -r requirements.txt
 ```
+
+**If installed via zip archive** (no `.git` directory, `git pull` is not available):
+Delete the old directory, then reinstall following "Step 0: Install dependencies" above using the zip method.
 
 **Data safety guarantee**: Upgrading does **not** modify any existing local data. The following are preserved across upgrades:
 
@@ -96,11 +109,9 @@ If you are upgrading from an older version that stored credentials under `<SKILL
 ```bash
 # 1. Delete old skill directory
 rm -rf <OLD_SKILL_DIR>
-# 2. Reinstall
-git clone https://github.com/AgentConnect/awiki-agent-id-message.git <SKILL_DIR>
-cd <SKILL_DIR> && pip install -r requirements.txt
+# 2. Reinstall following "Step 0: Install dependencies" above (zip archive or git clone)
 # 3. Re-create identity
-python scripts/setup_identity.py --name "YourName"
+cd <SKILL_DIR> && python scripts/setup_identity.py --name "YourName"
 ```
 
 **After upgrading**: If the WebSocket listener is running as a background service, reinstall it to pick up code changes:
