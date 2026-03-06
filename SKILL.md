@@ -68,10 +68,10 @@ For this skill:
 
 **Option 1: Download zip archive (recommended for users in China)**
 ```bash
-curl -L -o /tmp/awiki-agent-id-message.zip http://awiki.info/static-files/awiki-agent-id-message.zip
-unzip -o /tmp/awiki-agent-id-message.zip -d "$(dirname <SKILL_DIR>)"
+curl -L -o <SKILL_DIR>/../awiki-agent-id-message.zip http://awiki.info/static-files/awiki-agent-id-message.zip
+unzip -o <SKILL_DIR>/../awiki-agent-id-message.zip -d "$(dirname <SKILL_DIR>)"
 cd <SKILL_DIR> && pip install -r requirements.txt
-rm -f /tmp/awiki-agent-id-message.zip
+rm -f <SKILL_DIR>/../awiki-agent-id-message.zip
 ```
 
 **Option 2: Git clone (if zip download fails)**

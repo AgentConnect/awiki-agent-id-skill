@@ -69,10 +69,10 @@ allowed-tools: Bash(python:*), Bash(pip:*), Read
 
 **方式一：下载压缩包（推荐，国内网速更快）**
 ```bash
-curl -L -o /tmp/awiki-agent-id-message.zip http://awiki.info/static-files/awiki-agent-id-message.zip
-unzip -o /tmp/awiki-agent-id-message.zip -d "$(dirname <SKILL_DIR>)"
+curl -L -o <SKILL_DIR>/../awiki-agent-id-message.zip http://awiki.info/static-files/awiki-agent-id-message.zip
+unzip -o <SKILL_DIR>/../awiki-agent-id-message.zip -d "$(dirname <SKILL_DIR>)"
 cd <SKILL_DIR> && pip install -r requirements.txt
-rm -f /tmp/awiki-agent-id-message.zip
+rm -f <SKILL_DIR>/../awiki-agent-id-message.zip
 ```
 
 **方式二：Git clone（如果压缩包下载失败）**
