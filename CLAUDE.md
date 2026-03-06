@@ -14,7 +14,7 @@ The only exception is `README_zh.md`, which is the Chinese translation of the RE
 
 ## Project Overview
 
-DID (Decentralized Identifier) identity interaction Skill. Built on the ANP protocol, it provides Claude Code with DID identity management, messaging, social relationships, and E2EE end-to-end encrypted communication capabilities. Runs as a Claude Code Skill, configured via SKILL.md.
+DID (Decentralized Identifier) identity interaction Skill. Built on the ANP protocol, it provides Claude Code with DID identity management, Handle (short name) registration, messaging, social relationships, and E2EE end-to-end encrypted communication capabilities. Runs as a Claude Code Skill, configured via SKILL.md.
 
 ## Commands
 
@@ -33,9 +33,16 @@ python scripts/setup_identity.py --delete myid                # Delete identity
 
 # Profile management
 python scripts/get_profile.py                                 # View own Profile
-python scripts/get_profile.py --did "<DID>"                   # View another user's public Profile
+python scripts/get_profile.py --did "<DID>"                   # View another user's public Profile by DID
+python scripts/get_profile.py --handle alice                  # View another user's public Profile by handle
 python scripts/get_profile.py --resolve "<DID>"               # Resolve DID document
 python scripts/update_profile.py --nick-name "Name" --bio "Bio" --tags "tag1,tag2"
+
+# Handle (short name) registration and resolution
+python scripts/register_handle.py --handle alice --phone +8613800138000
+python scripts/register_handle.py --handle bob --phone +8613800138000 --invite-code ABC123
+python scripts/resolve_handle.py --handle alice               # Resolve handle to DID
+python scripts/resolve_handle.py --did "<DID>"                # Look up handle by DID
 
 # Messaging (requires identity creation first)
 python scripts/send_message.py --to "<DID>" --content "hello"
@@ -92,6 +99,7 @@ Three-layer architecture: CLI script layer -> Persistence layer -> Core utility 
 - **auth.py**: Complete authentication pipeline — `create_authenticated_identity()` chains: create identity -> `register_did()` register -> `get_jwt_via_wba()` obtain JWT
 - **client.py**: httpx AsyncClient factory (`create_user_service_client`, `create_molt_message_client`), 30s timeout, `trust_env=False`
 - **rpc.py**: JSON-RPC 2.0 client wrapper, `rpc_call()` sends requests, `JsonRpcError` wraps errors
+- **handle.py**: Handle (short name) registration and resolution — `send_otp()`, `register_handle()` (one-stop: create identity + register DID with handle + JWT), `resolve_handle()`, `lookup_handle()`. Uses `/user-service/handle/rpc` and `/user-service/did-auth/rpc` endpoints
 - **e2ee.py**: `E2eeClient` — Uses HPKE (RFC 9180, X25519 key agreement + chain Ratchet forward secrecy). One-step initialization (no multi-step handshake). Key separation: key-2 secp256r1 for signing + key-3 X25519 for key agreement (separate from DID's secp256k1). Supports `export_state()`/`from_state()` for cross-process state recovery
 - **ws.py**: `WsClient` — WebSocket client wrapper. Uses JWT query parameter authentication to connect to molt-message `/message/ws` endpoint. Supports JSON-RPC request/response, push notification reception, application-layer heartbeat (ping/pong)
 - **resolve.py**: `resolve_to_did()` — Handle-to-DID resolution. If input starts with `did:`, returns as-is. Otherwise calls `GET /user-service/.well-known/handle/{local_part}` (no auth required). Always resolves via server, no local cache
@@ -151,7 +159,7 @@ When modifying code logic, the corresponding file's `[INPUT]/[OUTPUT]/[POS]` hea
 
 ## Constraints
 
-- **ANP >= 0.6.1** is a hard dependency, providing DID and E2EE (HPKE) cryptographic primitives
+- **ANP >= 0.6.2** is a hard dependency, providing DID, E2EE (HPKE) cryptographic primitives, and WNS Handle validation
 - **Python >= 3.10**
 - All network operations must use async/await (httpx AsyncClient)
 - `.credentials/` directory must remain gitignored, private key files with 600 permissions

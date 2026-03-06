@@ -25,11 +25,14 @@ Usage:
 import argparse
 import asyncio
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import Any
 
 from utils import SDKConfig, create_molt_message_client, authenticated_rpc_call, resolve_to_did
+
+logger = logging.getLogger(__name__)
 from credential_store import create_authenticator
 import local_store
 
@@ -155,7 +158,7 @@ def _store_inbox_messages(
         local_store.store_messages_batch(conn, batch)
         conn.close()
     except Exception:
-        pass
+        logger.debug("Failed to store inbox messages locally", exc_info=True)
 
 
 def _store_history_messages(
@@ -191,7 +194,7 @@ def _store_history_messages(
         local_store.store_messages_batch(conn, batch)
         conn.close()
     except Exception:
-        pass
+        logger.debug("Failed to store history messages locally", exc_info=True)
 
 
 def main() -> None:

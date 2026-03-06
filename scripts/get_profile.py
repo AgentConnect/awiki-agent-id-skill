@@ -7,6 +7,9 @@ Usage:
     # View public Profile of a specific DID
     uv run python scripts/get_profile.py --did "did:wba:localhost:user:abc123"
 
+    # View public Profile of a specific handle
+    uv run python scripts/get_profile.py --handle alice
+
     # Resolve a DID document
     uv run python scripts/get_profile.py --resolve "did:wba:localhost:user:abc123"
 
@@ -25,7 +28,7 @@ import json
 import sys
 from pathlib import Path
 
-from utils import SDKConfig, create_user_service_client, rpc_call, authenticated_rpc_call, resolve_to_did
+from utils import SDKConfig, create_user_service_client, rpc_call, authenticated_rpc_call
 from credential_store import create_authenticator
 
 
@@ -49,12 +52,21 @@ async def get_my_profile(credential_name: str = "default") -> None:
         print(json.dumps(me, indent=2, ensure_ascii=False))
 
 
-async def get_public_profile(did: str) -> None:
-    """View public Profile of a specific DID."""
+async def get_public_profile(*, did: str | None = None, handle: str | None = None) -> None:
+    """View public Profile of a specific DID or handle."""
+    params: dict[str, str] = {}
+    if did:
+        params["did"] = did
+    elif handle:
+        params["handle"] = handle
+    else:
+        print("Error: must provide --did or --handle")
+        sys.exit(1)
+
     config = SDKConfig()
     async with create_user_service_client(config) as client:
         profile = await rpc_call(
-            client, PROFILE_RPC, "get_public_profile", {"did": did}
+            client, PROFILE_RPC, "get_public_profile", params
         )
         print(json.dumps(profile, indent=2, ensure_ascii=False))
 
@@ -71,7 +83,8 @@ async def resolve_did(did: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="View DID Profile")
-    parser.add_argument("--did", type=str, help="View public Profile of a specific DID or handle")
+    parser.add_argument("--did", type=str, help="View public Profile of a specific DID")
+    parser.add_argument("--handle", type=str, help="View public Profile of a specific handle")
     parser.add_argument("--resolve", type=str, help="Resolve a specific DID document")
     parser.add_argument("--credential", type=str, default="default",
                         help="Credential name (default: default)")
@@ -79,11 +92,9 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.resolve:
-        resolved_did = asyncio.run(resolve_to_did(args.resolve))
-        asyncio.run(resolve_did(resolved_did))
-    elif args.did:
-        target_did = asyncio.run(resolve_to_did(args.did))
-        asyncio.run(get_public_profile(target_did))
+        asyncio.run(resolve_did(args.resolve))
+    elif args.did or args.handle:
+        asyncio.run(get_public_profile(did=args.did, handle=args.handle))
     else:
         asyncio.run(get_my_profile(args.credential))
 

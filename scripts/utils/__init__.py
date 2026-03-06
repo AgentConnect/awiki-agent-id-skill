@@ -1,7 +1,7 @@
-"""awiki-sdk: General SDK for DID identity creation, WBA authentication, JWT acquisition, and WebSocket client.
+"""awiki-sdk: General SDK for DID identity creation, WBA authentication, JWT acquisition, Handle registration, and WebSocket client.
 
 [INPUT]: ANP library
-[OUTPUT]: Public API (DIDIdentity, create_identity, register_did, WsClient, ...)
+[OUTPUT]: Public API (DIDIdentity, create_identity, register_did, register_handle, WsClient, ...)
 [POS]: Package entry point, centralizes export of all public interfaces
 
 [PROTOCOL]:
@@ -21,6 +21,7 @@ from utils.auth import (
 from utils.client import create_user_service_client, create_molt_message_client
 from utils.e2ee import E2eeClient
 from utils.rpc import JsonRpcError, rpc_call, authenticated_rpc_call
+from utils.handle import send_otp, register_handle, resolve_handle, lookup_handle, normalize_phone
 from utils.ws import WsClient
 from utils.resolve import resolve_to_did
 
@@ -45,6 +46,12 @@ __all__ = [
     "JsonRpcError",
     "rpc_call",
     "authenticated_rpc_call",
+    # handle
+    "send_otp",
+    "register_handle",
+    "resolve_handle",
+    "lookup_handle",
+    "normalize_phone",
     # ws
     "WsClient",
     # resolve
