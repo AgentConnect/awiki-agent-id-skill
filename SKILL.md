@@ -76,7 +76,7 @@ rm -f <SKILL_DIR>/../awiki-agent-id-message.zip
 
 **Option 2: Git clone (if zip download fails)**
 ```bash
-git clone https://github.com/AgentConnect/awiki-agent-id-message.git <SKILL_DIR>
+git clone git@github.com:AgentConnect/awiki-agent-id-message.git <SKILL_DIR>
 cd <SKILL_DIR> && pip install -r requirements.txt
 ```
 
