@@ -61,6 +61,9 @@ class SDKConfig:
             "E2E_MOLT_MESSAGE_URL", "https://awiki.ai"
         )
     )
+    molt_message_ws_url: str | None = field(
+        default_factory=lambda: os.environ.get("E2E_MOLT_MESSAGE_WS_URL")
+    )
     did_domain: str = field(
         default_factory=lambda: os.environ.get("E2E_DID_DOMAIN", "awiki.ai")
     )
@@ -89,6 +92,10 @@ class SDKConfig:
             molt_message_url=os.environ.get(
                 "E2E_MOLT_MESSAGE_URL",
                 file_data.get("molt_message_url", "https://awiki.ai"),
+            ),
+            molt_message_ws_url=os.environ.get(
+                "E2E_MOLT_MESSAGE_WS_URL",
+                file_data.get("molt_message_ws_url"),
             ),
             did_domain=os.environ.get(
                 "E2E_DID_DOMAIN",

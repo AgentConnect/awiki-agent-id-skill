@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import httpx
 
+from utils.client import _resolve_verify
 from utils.config import SDKConfig
 
 
@@ -41,14 +42,23 @@ async def resolve_to_did(
     if config is None:
         config = SDKConfig()
 
-    # Strip domain suffix if present (e.g., "alice.awiki.ai" -> "alice")
-    domain = config.did_domain
-    if domain and identifier.endswith(f".{domain}"):
-        identifier = identifier[: -(len(domain) + 1)]
+    # Strip known awiki domain suffixes if present
+    # (e.g., "alice.awiki.ai" -> "alice", "alice.awiki.test" -> "alice").
+    strip_domains = {"awiki.ai", "awiki.test"}
+    if config.did_domain:
+        strip_domains.add(config.did_domain)
+    for domain in strip_domains:
+        if identifier.endswith(f".{domain}"):
+            identifier = identifier[: -(len(domain) + 1)]
+            break
 
     url = f"{config.user_service_url}/user-service/.well-known/handle/{identifier}"
 
-    async with httpx.AsyncClient(timeout=10.0, trust_env=False) as client:
+    async with httpx.AsyncClient(
+        timeout=10.0,
+        trust_env=False,
+        verify=_resolve_verify(config.user_service_url),
+    ) as client:
         resp = await client.get(url)
 
     if resp.status_code == 404:
