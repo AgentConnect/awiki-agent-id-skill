@@ -3,7 +3,8 @@
 [INPUT]: SDKConfig (data_dir for database path)
 [OUTPUT]: get_connection(), ensure_schema(), store_message(), store_messages_batch(),
          make_thread_id(), upsert_contact(), execute_sql()
-[POS]: Persistence layer — single shared SQLite database for offline message storage and contact management
+[POS]: Persistence layer — single shared SQLite database for offline message storage
+       and contact management, with per-credential message ownership
 
 [PROTOCOL]:
 1. Update this header when logic changes
@@ -21,7 +22,7 @@ from typing import Any
 from utils.config import SDKConfig
 
 # Current schema version (bump when schema changes)
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 # SQL patterns that are always forbidden
 _FORBIDDEN_PATTERNS = [
@@ -60,7 +61,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     """Create tables, views, and indexes if they don't exist.
 
     Idempotent — safe to call on every connection open.
-    Handles migration from schema v1 (adds credential_name column).
+    Handles migration from schema v1/v2 to per-credential message ownership.
     """
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version >= _SCHEMA_VERSION:
@@ -82,7 +83,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         );
 
         CREATE TABLE IF NOT EXISTS messages (
-            msg_id          TEXT PRIMARY KEY,
+            msg_id          TEXT NOT NULL,
             thread_id       TEXT NOT NULL,
             direction       INTEGER NOT NULL DEFAULT 0,
             sender_did      TEXT,
@@ -98,7 +99,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             is_read         INTEGER DEFAULT 0,
             sender_name     TEXT,
             metadata        TEXT,
-            credential_name TEXT
+            credential_name TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (msg_id, credential_name)
         );
 
         CREATE INDEX IF NOT EXISTS idx_messages_thread
@@ -111,9 +113,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             ON messages(credential_name);
     """)
 
-    # Migration: add credential_name column if upgrading from v1
-    if version == 1:
-        # Check if credential_name column already exists
+    # Migration to v3: rebuild messages table so msg_id is deduplicated per credential.
+    if version in (1, 2):
         columns = {
             row[1]
             for row in conn.execute("PRAGMA table_info(messages)").fetchall()
@@ -122,10 +123,58 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             conn.execute(
                 "ALTER TABLE messages ADD COLUMN credential_name TEXT"
             )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_messages_credential "
-                "ON messages(credential_name)"
+
+        conn.executescript("""
+            DROP VIEW IF EXISTS threads;
+            DROP VIEW IF EXISTS inbox;
+            DROP VIEW IF EXISTS outbox;
+
+            CREATE TABLE IF NOT EXISTS messages_v3 (
+                msg_id          TEXT NOT NULL,
+                thread_id       TEXT NOT NULL,
+                direction       INTEGER NOT NULL DEFAULT 0,
+                sender_did      TEXT,
+                receiver_did    TEXT,
+                group_id        TEXT,
+                group_did       TEXT,
+                content_type    TEXT DEFAULT 'text',
+                content         TEXT,
+                server_seq      INTEGER,
+                sent_at         TEXT,
+                stored_at       TEXT NOT NULL,
+                is_e2ee         INTEGER DEFAULT 0,
+                is_read         INTEGER DEFAULT 0,
+                sender_name     TEXT,
+                metadata        TEXT,
+                credential_name TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (msg_id, credential_name)
+            );
+
+            INSERT OR IGNORE INTO messages_v3 (
+                msg_id, thread_id, direction, sender_did, receiver_did,
+                group_id, group_did, content_type, content, server_seq,
+                sent_at, stored_at, is_e2ee, is_read, sender_name, metadata,
+                credential_name
             )
+            SELECT
+                msg_id, thread_id, direction, sender_did, receiver_did,
+                group_id, group_did, content_type, content, server_seq,
+                sent_at, stored_at, is_e2ee, is_read, sender_name, metadata,
+                COALESCE(credential_name, '')
+            FROM messages;
+
+            DROP TABLE messages;
+            ALTER TABLE messages_v3 RENAME TO messages;
+
+            CREATE INDEX IF NOT EXISTS idx_messages_thread
+                ON messages(thread_id, sent_at);
+            CREATE INDEX IF NOT EXISTS idx_messages_direction
+                ON messages(direction);
+            CREATE INDEX IF NOT EXISTS idx_messages_sender
+                ON messages(sender_did);
+            CREATE INDEX IF NOT EXISTS idx_messages_credential
+                ON messages(credential_name);
+        """)
 
     # Views (DROP + CREATE to allow schema evolution)
     conn.executescript("""
@@ -157,6 +206,11 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
 
     conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
     conn.commit()
+
+
+def _normalize_credential_name(credential_name: str | None) -> str:
+    """Normalize credential_name for composite primary-key storage."""
+    return credential_name or ""
 
 
 def make_thread_id(
@@ -206,11 +260,11 @@ def store_message(
     metadata: str | None = None,
     credential_name: str | None = None,
 ) -> None:
-    """Store a single message. Duplicate msg_id is silently ignored (INSERT OR IGNORE).
+    """Store a single message. Duplicates are ignored per (msg_id, credential_name).
 
     Args:
         conn: SQLite connection.
-        msg_id: Unique message identifier.
+        msg_id: Unique message identifier within a credential owner.
         thread_id: Thread identifier (from make_thread_id).
         direction: 0 = incoming, 1 = outgoing.
         sender_did: Sender's DID.
@@ -225,9 +279,11 @@ def store_message(
         is_read: Whether this message has been read.
         sender_name: Display name of sender (optional).
         metadata: JSON metadata string (optional).
-        credential_name: Credential name that owns this message (optional).
+        credential_name: Credential name that owns this message. None is stored
+            as an empty owner key for backward compatibility.
     """
     now = datetime.now(timezone.utc).isoformat()
+    normalized_credential_name = _normalize_credential_name(credential_name)
     conn.execute(
         """INSERT OR IGNORE INTO messages
            (msg_id, thread_id, direction, sender_did, receiver_did,
@@ -239,7 +295,7 @@ def store_message(
             msg_id, thread_id, direction, sender_did, receiver_did,
             group_id, group_did, content_type, content, server_seq,
             sent_at, now, int(is_e2ee), int(is_read), sender_name, metadata,
-            credential_name,
+            normalized_credential_name,
         ),
     )
     conn.commit()
@@ -284,7 +340,7 @@ def store_messages_batch(
             int(msg.get("is_read", False)),
             msg.get("sender_name"),
             msg.get("metadata"),
-            msg.get("credential_name", credential_name),
+            _normalize_credential_name(msg.get("credential_name", credential_name)),
         ))
 
     conn.executemany(

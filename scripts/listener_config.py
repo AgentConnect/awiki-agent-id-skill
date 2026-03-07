@@ -1,7 +1,8 @@
 """WebSocket listener config: webhook endpoints + routing rules + routing modes + E2EE transparent handling.
 
 [INPUT]: Environment variables, JSON config file, settings.json (unified config)
-[OUTPUT]: ListenerConfig, RoutingRules, ROUTING_MODES
+[OUTPUT]: ListenerConfig, RoutingRules, ROUTING_MODES using current-protocol
+          E2EE ignore types
 [POS]: Configuration module for ws_listener.py, defines routing rules, webhook targets, and E2EE handling parameters
 
 [PROTOCOL]:
@@ -59,10 +60,10 @@ class ListenerConfig:
     # Routing rules (only effective when mode="smart")
     routing: RoutingRules = field(default_factory=RoutingRules)
 
-    # E2EE protocol message types (intercepted by E2EE handler before classify_message)
+    # Current E2EE protocol message types (intercepted by the E2EE handler
+    # before classify_message; legacy types are dropped by ws_listener guards).
     ignore_types: frozenset[str] = frozenset({
         "e2ee_init", "e2ee_msg", "e2ee_rekey", "e2ee_error",
-        "e2ee_hello", "e2ee_finished", "e2ee",
     })
 
     # E2EE transparent handling (always enabled)

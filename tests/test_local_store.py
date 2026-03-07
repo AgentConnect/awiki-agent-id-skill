@@ -54,14 +54,14 @@ class TestSchema:
 
     def test_schema_version(self, db):
         version = db.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 2
+        assert version == 3
 
     def test_ensure_schema_idempotent(self, db):
         """Calling ensure_schema multiple times is safe."""
         local_store.ensure_schema(db)
         local_store.ensure_schema(db)
         version = db.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 2
+        assert version == 3
 
     def test_wal_mode(self, db):
         mode = db.execute("PRAGMA journal_mode").fetchone()[0]
@@ -178,7 +178,7 @@ class TestStoreMessage:
         row = db.execute(
             "SELECT credential_name FROM messages WHERE msg_id='m_no_cred'"
         ).fetchone()
-        assert row["credential_name"] is None
+        assert row["credential_name"] == ""
 
 
 class TestStoreMessagesBatch:
@@ -221,6 +221,22 @@ class TestStoreMessagesBatch:
             "SELECT credential_name FROM messages ORDER BY msg_id"
         ).fetchall()
         assert all(row["credential_name"] == "bob" for row in rows)
+
+    def test_batch_allows_same_msg_id_for_different_credentials(self, db):
+        batch = [
+            {"msg_id": "shared1", "thread_id": "dm:a:b", "direction": 1,
+             "sender_did": "did:a", "content": "msg", "credential_name": "alice"},
+            {"msg_id": "shared1", "thread_id": "dm:a:b", "direction": 0,
+             "sender_did": "did:a", "content": "msg", "credential_name": "bob"},
+        ]
+        local_store.store_messages_batch(db, batch)
+        rows = db.execute(
+            "SELECT msg_id, credential_name, direction FROM messages "
+            "WHERE msg_id='shared1' ORDER BY credential_name"
+        ).fetchall()
+        assert len(rows) == 2
+        assert rows[0]["credential_name"] == "alice"
+        assert rows[1]["credential_name"] == "bob"
 
     def test_batch_per_message_credential_override(self, db):
         batch = [
@@ -319,7 +335,7 @@ class TestCredentialNameFilter:
         assert result[0]["cnt"] == 1
 
         result = local_store.execute_sql(
-            db, "SELECT COUNT(*) as cnt FROM messages WHERE credential_name IS NULL"
+            db, "SELECT COUNT(*) as cnt FROM messages WHERE credential_name = ''"
         )
         assert result[0]["cnt"] == 1
 

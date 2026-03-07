@@ -27,11 +27,11 @@ Stores contact information indexed by DID. Contacts are global (DID is unique ac
 
 ### messages
 
-Stores all messages (incoming and outgoing). The `credential_name` column distinguishes which identity sent/received a message.
+Stores all messages (incoming and outgoing). The `credential_name` column distinguishes which identity sent/received a message, and the composite primary key `(msg_id, credential_name)` allows the same server message to be stored for multiple local identities.
 
 | Column | Type | Constraint | Description |
 |--------|------|------------|-------------|
-| msg_id | TEXT | PRIMARY KEY | Unique message identifier |
+| msg_id | TEXT | PRIMARY KEY (with `credential_name`) | Message identifier scoped by credential owner |
 | thread_id | TEXT | NOT NULL | Thread identifier (see Thread ID Format) |
 | direction | INTEGER | NOT NULL, DEFAULT 0 | 0 = incoming, 1 = outgoing |
 | sender_did | TEXT | | Sender's DID |
@@ -47,7 +47,7 @@ Stores all messages (incoming and outgoing). The `credential_name` column distin
 | is_read | INTEGER | DEFAULT 0 | 1 if message has been read |
 | sender_name | TEXT | | Display name of sender |
 | metadata | TEXT | | JSON metadata |
-| credential_name | TEXT | | Credential identity that owns this message |
+| credential_name | TEXT | NOT NULL, DEFAULT '' | Credential identity that owns this message |
 
 #### Indexes
 
@@ -87,9 +87,11 @@ Thread IDs are deterministic and symmetric:
 
 ## Schema Versioning
 
-Schema version tracked via `PRAGMA user_version`. Current version: **2**.
+Schema version tracked via `PRAGMA user_version`. Current version: **3**.
 
-Migration from v1 to v2: adds `credential_name TEXT` column and `idx_messages_credential` index.
+Migration history:
+- v1 → v2: adds `credential_name TEXT` column and `idx_messages_credential` index
+- v2 → v3: rebuilds `messages` so deduplication happens per `(msg_id, credential_name)`
 
 ## Safety Rules (execute_sql)
 

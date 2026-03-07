@@ -6,7 +6,8 @@ Usage:
     python scripts/check_status.py --credential alice   # Specify credential
 
 [INPUT]: SDK (RPC calls, E2eeClient), credential_store (authenticator factory), e2ee_store
-[OUTPUT]: Structured JSON status report (identity + inbox + e2ee_auto + e2ee_sessions)
+[OUTPUT]: Structured JSON status report (identity + inbox + e2ee_auto + e2ee_sessions),
+          with inbox refreshed after optional auto-processing
 [POS]: Unified status check entry point for Agent session startup and heartbeat calls (HPKE E2EE scheme)
 
 [PROTOCOL]:
@@ -37,6 +38,7 @@ AUTH_RPC = "/user-service/did-auth/rpc"
 
 # E2EE protocol message types
 _E2EE_HANDSHAKE_TYPES = {"e2ee_init", "e2ee_rekey", "e2ee_error"}
+_E2EE_SESSION_SETUP_TYPES = {"e2ee_init", "e2ee_rekey"}
 _E2EE_MSG_TYPES = {"e2ee_init", "e2ee_msg", "e2ee_rekey", "e2ee_error"}
 _E2EE_TYPE_ORDER = {"e2ee_init": 0, "e2ee_rekey": 1, "e2ee_msg": 2, "e2ee_error": 3}
 
@@ -243,6 +245,9 @@ async def auto_process_e2ee(
 
                 try:
                     responses = await e2ee_client.process_e2ee_message(msg_type, content)
+                    session_ready = True
+                    if msg_type in _E2EE_SESSION_SETUP_TYPES:
+                        session_ready = e2ee_client.has_session_id(content.get("session_id"))
                     # Route responses to sender_did
                     for resp_type, resp_content in responses:
                         await _send_msg(
@@ -250,12 +255,21 @@ async def auto_process_e2ee(
                             auth=auth, credential_name=credential_name,
                         )
 
-                    details.append({
-                        "msg_type": msg_type,
-                        "sender_did": sender_did,
-                        "responses_sent": len(responses),
-                    })
-                    processed_ids.append(msg["id"])
+                    if session_ready:
+                        details.append({
+                            "msg_type": msg_type,
+                            "sender_did": sender_did,
+                            "responses_sent": len(responses),
+                            "status": "processed",
+                        })
+                        processed_ids.append(msg["id"])
+                    else:
+                        details.append({
+                            "msg_type": msg_type,
+                            "sender_did": sender_did,
+                            "responses_sent": len(responses),
+                            "status": "session_not_activated",
+                        })
                 except Exception as e:
                     details.append({
                         "msg_type": msg_type,
@@ -308,6 +322,8 @@ async def check_status(
     # 3. E2EE auto-processing (optional)
     if auto_e2ee:
         report["e2ee_auto"] = await auto_process_e2ee(credential_name)
+        # Refresh inbox so the report reflects the post-processing state.
+        report["inbox"] = await summarize_inbox(credential_name)
 
     # 4. E2EE session status
     e2ee_state = load_e2ee_state(credential_name)

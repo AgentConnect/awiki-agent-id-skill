@@ -17,7 +17,7 @@ Supported workflows:
 4. Bob:   --process --peer <Alice's DID> -> Restore session from disk, decrypt message
 
 [INPUT]: SDK (E2eeClient, RPC calls), credential_store (load identity credentials), e2ee_store (E2EE state persistence)
-[OUTPUT]: E2EE operation results
+[OUTPUT]: E2EE operation results with failure-aware inbox processing and state persistence
 [POS]: End-to-end encrypted messaging script, integrates state persistence for cross-process E2EE communication (HPKE scheme)
 
 [PROTOCOL]:
@@ -41,6 +41,7 @@ MESSAGE_RPC = "/message/rpc"
 
 # E2EE related message types
 _E2EE_MSG_TYPES = {"e2ee_init", "e2ee_msg", "e2ee_rekey", "e2ee_error"}
+_E2EE_SESSION_SETUP_TYPES = {"e2ee_init", "e2ee_rekey"}
 
 # E2EE message type protocol order
 _E2EE_TYPE_ORDER = {"e2ee_init": 0, "e2ee_rekey": 1, "e2ee_msg": 2, "e2ee_error": 3}
@@ -202,6 +203,7 @@ async def process_inbox(
         for msg in messages:
             msg_type = msg["type"]
             sender_did = msg.get("sender_did", "?")
+            processed_ok = False
 
             if msg_type in _E2EE_MSG_TYPES:
                 content = json.loads(msg["content"])
@@ -210,11 +212,25 @@ async def process_inbox(
                     try:
                         original_type, plaintext = e2ee_client.decrypt_message(content)
                         print(f"  [{msg_type}] Decrypted message: [{original_type}] {plaintext}")
+                        processed_ok = True
                     except RuntimeError as e:
                         print(f"  [{msg_type}] Decryption failed: {e}")
                 else:
                     responses = await e2ee_client.process_e2ee_message(msg_type, content)
-                    print(f"  [{msg_type}] Processed protocol message, generated {len(responses)} response(s)")
+                    session_ready = True
+                    if msg_type in _E2EE_SESSION_SETUP_TYPES:
+                        session_ready = e2ee_client.has_session_id(content.get("session_id"))
+                    if session_ready:
+                        print(
+                            f"  [{msg_type}] Processed protocol message, generated "
+                            f"{len(responses)} response(s)"
+                        )
+                        processed_ok = True
+                    else:
+                        print(
+                            f"  [{msg_type}] Protocol message did not activate a session; "
+                            "left unread for inspection"
+                        )
                     for resp_type, resp_content in responses:
                         await _send_msg(
                             client, data["did"], peer_did, resp_type, resp_content,
@@ -223,8 +239,10 @@ async def process_inbox(
                         print(f"    -> Sent {resp_type}")
             else:
                 print(f"  [{msg_type}] From {sender_did[:40]}...: {msg['content']}")
+                processed_ok = True
 
-            processed_ids.append(msg["id"])
+            if processed_ok:
+                processed_ids.append(msg["id"])
 
         # Mark as read
         if processed_ids:

@@ -16,7 +16,8 @@ cd <SKILL_DIR> && python scripts/check_status.py --auto-e2ee
 | `identity.status == "no_jwt"` | Run `setup_identity.py --load default` to refresh JWT |
 | `identity.status == "jwt_refresh_failed"` | Inform the user refresh failed; suggest deleting credentials and recreating |
 | `inbox.text_messages > 0` | Display message summary; prompt user to review |
-| `inbox.has_pending_handshakes == true` | Inform the user of pending E2EE handshake requests (already handled by --auto-e2ee) |
+| `len(inbox.e2ee_encrypted_from) > 0` | Inform the user there are unread encrypted messages; use `e2ee_messaging.py --process --peer <DID>` or the WebSocket listener to decrypt |
+| `inbox.has_pending_handshakes == true` | Inform the user there are still pending E2EE handshake requests |
 | `e2ee_auto.processed > 0` | Report auto-processing results |
 | All normal | "DID identity OK, no unread messages." |
 
@@ -32,6 +33,12 @@ E2EE: [active] active / [pending] handshaking
 If E2EE auto-processing occurred:
 ```
 E2EE auto-processing: automatically accepted encrypted communication request from [DID]
+```
+
+If unread encrypted messages remain:
+```
+Unread encrypted messages from: [DID, DID...]
+Use `e2ee_messaging.py --process --peer <DID>` now, or rely on the WebSocket listener for transparent decryption.
 ```
 
 ### Step 4: Check Profile Completeness
@@ -57,6 +64,7 @@ The Agent should maintain in memory:
 
 Only notify the user when any of the following are true; otherwise, remain completely silent:
 - `inbox.text_messages > 0`
+- `len(inbox.e2ee_encrypted_from) > 0`
 - `e2ee_auto.processed > 0`
 - `identity.jwt_refreshed == true`
 - `identity.status != "ok"`
@@ -71,9 +79,9 @@ Only notify the user when any of the following are true; otherwise, remain compl
 ## E2EE Auto-Processing Strategy
 
 **Auto-process (no confirmation needed):**
-- `e2ee_hello` → auto-reply to handshake
-- `e2ee_finished` → auto-activate session
-- `e2ee_error` → log the error
+- `e2ee_init` → accept and establish the session
+- `e2ee_rekey` → refresh the session
+- `e2ee_error` → log the error / allow follow-up re-handshake logic
 
 **Notify user:**
 - "Automatically accepted encrypted communication request from [DID]"
@@ -82,9 +90,14 @@ Only notify the user when any of the following are true; otherwise, remain compl
 **Do not auto-execute (requires user instruction):**
 - Initiating handshakes, sending encrypted messages, decrypting messages
 
+**Important note:** `check_status.py --auto-e2ee` only auto-processes E2EE protocol messages. It does **not** decrypt unread `e2ee_msg` content into plaintext. For actual plaintext delivery, use `e2ee_messaging.py --process --peer <DID>` or run the WebSocket listener.
+
 **Design rationale:** The E2EE protocol has no rejection mechanism, and handshake messages expire after 5 minutes. Auto-accepting avoids timeouts; notifying the user maintains transparency.
 
 ## check_status.py Output Field Reference
+
+When `--auto-e2ee` is enabled, the reported `inbox` snapshot reflects the
+post-auto-processing state.
 
 | Field Path | Type | Description |
 |-----------|------|-------------|
@@ -101,7 +114,7 @@ Only notify the user when any of the following are true; otherwise, remain compl
 | `inbox.text_by_sender` | object | `{did: {count: int, latest: string}}` |
 | `inbox.has_pending_handshakes` | bool | Whether there are pending E2EE handshakes |
 | `inbox.e2ee_handshake_pending` | list | List of DIDs that initiated handshakes |
-| `inbox.e2ee_encrypted_from` | list | List of DIDs that sent encrypted messages |
+| `inbox.e2ee_encrypted_from` | list | List of DIDs that sent unread encrypted messages which still require `--process` or WebSocket listener decryption |
 | `inbox.by_type` | object | Count by message type `{type: count}` |
 | `e2ee_auto.status` | string | `"ok"` / `"no_identity"` / `"error"` (only with --auto-e2ee) |
 | `e2ee_auto.processed` | int | Number auto-processed this time (only with --auto-e2ee) |

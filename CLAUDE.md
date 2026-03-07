@@ -30,6 +30,8 @@ python scripts/setup_identity.py --name "Bot" --agent        # Create AI Agent i
 python scripts/setup_identity.py --load default               # Load identity (auto-refresh expired JWT)
 python scripts/setup_identity.py --list                       # List identities
 python scripts/setup_identity.py --delete myid                # Delete identity
+python scripts/regenerate_e2ee_keys.py --credential default    # Regenerate E2EE keys for existing identity
+python scripts/regenerate_e2ee_keys.py --credential default --force  # Force regenerate even if keys exist
 
 # Profile management
 python scripts/get_profile.py                                 # View own Profile
@@ -108,7 +110,7 @@ Three-layer architecture: CLI script layer -> Persistence layer -> Core utility 
 ### scripts/ — CLI Script Layer
 
 - **credential_store.py** / **e2ee_store.py**: Credential and E2EE state persistence to `~/.openclaw/credentials/awiki-agent-id-message/` directory (JSON format, 600 permissions)
-- **local_store.py**: SQLite local storage — contacts + messages two tables, threads/inbox/outbox views. Single shared database at `<DATA_DIR>/database/awiki.db`. Messages have `credential_name` column to distinguish multi-identity. WAL mode for concurrent read/write. Sync API (sqlite3 stdlib), ws_listener wraps via `asyncio.to_thread()`. Schema versioned via `PRAGMA user_version` (current: v2)
+- **local_store.py**: SQLite local storage — contacts + messages two tables, threads/inbox/outbox views. Single shared database at `<DATA_DIR>/database/awiki.db`. Messages are owned per credential via composite key `(msg_id, credential_name)` so the same server message can exist for multiple local identities. WAL mode for concurrent read/write. Sync API (sqlite3 stdlib), ws_listener wraps via `asyncio.to_thread()`. Schema versioned via `PRAGMA user_version` (current: v3)
 - **query_db.py**: Read-only SQL query CLI — accepts a SELECT statement, executes against local SQLite, returns JSON. Rejects write operations and multi-statement queries
 - **check_status.py**: Unified status check entry point — chains identity verification, inbox classification summary, E2EE auto-handshake processing. Outputs structured JSON. Called by Agent session startup protocol and heartbeat
 - **listener_config.py**: `ListenerConfig` + `RoutingRules` — WebSocket listener configuration module. Defines dual webhook endpoints, routing modes (agent-all/smart/wake-all), message routing rules and E2EE transparent processing parameters. Supports unified settings.json (`listener` sub-object, at `<DATA_DIR>/config/settings.json`) + legacy JSON file + environment variables + CLI four-level override

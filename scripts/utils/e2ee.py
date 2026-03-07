@@ -3,7 +3,8 @@
 [INPUT]: ANP E2eeHpkeSession / HpkeKeyManager / detect_message_type, local_did,
          signing_pem (secp256r1 key-2), x25519_pem (key-3)
 [OUTPUT]: E2eeClient class providing high-level API for one-step initialization,
-          encryption, decryption, and state export/restore
+          encryption, decryption, proof-field-compatible protocol processing,
+          and state export/restore
 [POS]: Wraps ANP's underlying HPKE E2EE protocol (RFC 9180 + Chain Ratchet) to provide
        a simple encrypt/decrypt interface for upper-layer applications;
        supports cross-process state persistence
@@ -44,6 +45,29 @@ logger = logging.getLogger(__name__)
 
 # State version marker, used to distinguish from old formats
 _STATE_VERSION = "hpke_v1"
+
+
+def _extract_proof_verification_method(proof: Any) -> str:
+    """Extract the proof verification method with field-name compatibility.
+
+    The ANP HPKE protocol uses snake_case ``verification_method`` in message
+    proofs, while some older callers may still send camelCase
+    ``verificationMethod``. The receiver accepts both to avoid session setup
+    failures during mixed-version deployments.
+
+    Args:
+        proof: Proof object from the E2EE message content.
+
+    Returns:
+        Verification method ID, or an empty string when unavailable.
+    """
+    if not isinstance(proof, dict):
+        return ""
+    return str(
+        proof.get("verification_method")
+        or proof.get("verificationMethod")
+        or ""
+    )
 
 
 class E2eeClient:
@@ -179,6 +203,12 @@ class E2eeClient:
         """Check whether an active encryption session exists with the specified peer."""
         session = self._key_manager.get_active_session(self.local_did, peer_did)
         return session is not None
+
+    def has_session_id(self, session_id: str | None) -> bool:
+        """Check whether the specified session_id currently exists and is active."""
+        if not session_id:
+            return False
+        return self._key_manager.get_session_by_id(session_id) is not None
 
     async def ensure_active_session(
         self, peer_did: str
@@ -397,7 +427,7 @@ class E2eeClient:
 
         # Extract sender signing public key (for proof verification)
         proof = content.get("proof", {})
-        vm_id = proof.get("verificationMethod", "")
+        vm_id = _extract_proof_verification_method(proof)
         try:
             sender_signing_pk = extract_signing_public_key_from_did_document(
                 sender_doc, vm_id
@@ -456,7 +486,7 @@ class E2eeClient:
 
         # Extract sender signing public key
         proof = content.get("proof", {})
-        vm_id = proof.get("verificationMethod", "")
+        vm_id = _extract_proof_verification_method(proof)
         try:
             sender_signing_pk = extract_signing_public_key_from_did_document(
                 sender_doc, vm_id

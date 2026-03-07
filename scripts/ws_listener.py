@@ -60,6 +60,16 @@ def _truncate_did(did: str) -> str:
     return f"{did[:8]}...{did[-8:]}"
 
 
+def _is_reserved_e2ee_type(msg_type: str) -> bool:
+    """Return whether the message type belongs to raw E2EE transport data."""
+    return (
+        msg_type == "e2ee"
+        or msg_type.startswith("e2ee_")
+        or msg_type.startswith("group_e2ee_")
+        or msg_type == "group_epoch_advance"
+    )
+
+
 # --- Route Classification ----------------------------------------------------
 
 def classify_message(
@@ -89,7 +99,7 @@ def classify_message(
     # === Drop conditions (common to all modes) ===
     if sender_did == my_did:
         return None
-    if msg_type in cfg.ignore_types:
+    if msg_type in cfg.ignore_types or _is_reserved_e2ee_type(msg_type):
         return None
     if sender_did in cfg.routing.blacklist_dids:
         return None
