@@ -1,7 +1,8 @@
-"""Registration + WBA authentication + JWT acquisition.
+"""Registration + DID document update + WBA authentication + JWT acquisition.
 
 [INPUT]: httpx.AsyncClient, DIDIdentity, ANP auth functions, rpc_call(), services
-[OUTPUT]: register_did(), get_jwt_via_wba(), generate_wba_auth_header(), create_authenticated_identity()
+[OUTPUT]: register_did(), update_did_document(), get_jwt_via_wba(),
+          generate_wba_auth_header(), create_authenticated_identity()
 [POS]: Wraps the complete DID authentication flow, all based on ANP, communicating with
        user-service via JSON-RPC 2.0.
        RPC paths use /user-service prefix (compatible with nginx reverse proxy and localhost direct connection)
@@ -23,7 +24,7 @@ from anp.authentication import generate_auth_header
 
 from utils.config import SDKConfig
 from utils.identity import DIDIdentity, create_identity
-from utils.rpc import rpc_call
+from utils.rpc import JsonRpcError, rpc_call
 
 
 def _secp256k1_sign_callback(
@@ -111,6 +112,72 @@ async def register_did(
     return await rpc_call(client, "/user-service/did-auth/rpc", "register", payload)
 
 
+async def update_did_document(
+    client: httpx.AsyncClient,
+    identity: DIDIdentity,
+    domain: str,
+    *,
+    is_public: bool = False,
+    is_agent: bool = False,
+    role: str | None = None,
+    endpoint_url: str | None = None,
+) -> dict[str, Any]:
+    """Update an existing DID document via DID WBA authentication.
+
+    Args:
+        client: HTTP client pointing to user-service.
+        identity: DID identity with the updated did_document.
+        domain: Service domain used for DID WBA authentication.
+        is_public: Whether publicly visible.
+        is_agent: Whether this is an AI Agent.
+        role: Role.
+        endpoint_url: Connection endpoint.
+
+    Returns:
+        Update response dict (contains did, user_id, message, optional access_token).
+
+    Raises:
+        JsonRpcError: When the server returns a JSON-RPC error.
+        httpx.HTTPStatusError: On HTTP layer errors.
+    """
+    payload: dict[str, Any] = {"did_document": identity.did_document}
+    if is_public:
+        payload["is_public"] = True
+    if is_agent:
+        payload["is_agent"] = True
+    if role is not None:
+        payload["role"] = role
+    if endpoint_url is not None:
+        payload["endpoint_url"] = endpoint_url
+
+    auth_header = generate_wba_auth_header(identity, domain)
+    response = await client.post(
+        "/user-service/did-auth/rpc",
+        json={
+            "jsonrpc": "2.0",
+            "method": "update_document",
+            "params": payload,
+            "id": 1,
+        },
+        headers={"Authorization": auth_header},
+    )
+    response.raise_for_status()
+    body = response.json()
+    if body.get("error") is not None:
+        error = body["error"]
+        raise JsonRpcError(
+            error["code"],
+            error["message"],
+            error.get("data"),
+        )
+
+    result = body["result"]
+    auth_value = response.headers.get("authorization", "").strip()
+    if auth_value.lower().startswith("bearer ") and not result.get("access_token"):
+        result["access_token"] = auth_value.split(" ", 1)[1]
+    return result
+
+
 async def get_jwt_via_wba(
     client: httpx.AsyncClient,
     identity: DIDIdentity,
@@ -196,6 +263,7 @@ async def create_authenticated_identity(
 __all__ = [
     "generate_wba_auth_header",
     "register_did",
+    "update_did_document",
     "get_jwt_via_wba",
     "create_authenticated_identity",
 ]

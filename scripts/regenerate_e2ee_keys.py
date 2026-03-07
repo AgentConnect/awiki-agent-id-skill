@@ -3,14 +3,14 @@
 When a credential file is missing E2EE private keys (e2ee_signing_private_pem,
 e2ee_agreement_private_pem), this script generates new key-2 (secp256r1) and
 key-3 (X25519) key pairs, updates the DID document with new public keys,
-re-signs the document with key-1, registers the update on the server,
+re-signs the document with key-1, calls did-auth.update_document on the server,
 and saves everything locally.
 
 Usage:
     python scripts/regenerate_e2ee_keys.py --credential default
 
 [INPUT]: credential_store (load/save), ANP (_build_e2ee_entries, generate_w3c_proof),
-         utils.auth (register_did, get_jwt_via_wba), utils.config (SDKConfig)
+         utils.auth (update_did_document, get_jwt_via_wba), utils.config (SDKConfig)
 [OUTPUT]: Updated credential file with E2EE private keys and refreshed DID document
 [POS]: CLI script for E2EE key recovery; one-time repair tool
 
@@ -28,7 +28,7 @@ import sys
 from utils import (
     SDKConfig,
     create_user_service_client,
-    register_did,
+    update_did_document,
     get_jwt_via_wba,
 )
 from utils.identity import DIDIdentity, load_private_key
@@ -49,14 +49,16 @@ async def regenerate_e2ee_keys(
         1. Load existing credential and verify key-1 exists
         2. Generate new key-2 (secp256r1) and key-3 (X25519) via ANP
         3. Update DID document: replace key-2/key-3 entries, update keyAgreement, re-sign
-        4. Register updated DID document on server and refresh JWT
+        4. Update the DID document on the server and refresh JWT
         5. Save updated credential locally
     """
     # Step 1: Load existing credential
     data = load_identity(credential_name)
     if data is None:
         print(f"Error: Credential '{credential_name}' not found.")
-        print("Create an identity first: python scripts/setup_identity.py --name MyAgent")
+        print(
+            "Create an identity first: python scripts/setup_identity.py --name MyAgent"
+        )
         sys.exit(1)
 
     did = data["did"]
@@ -89,9 +91,7 @@ async def regenerate_e2ee_keys(
     print("\nGenerating new E2EE keys...")
     e2ee_vms, ka_refs, e2ee_keys = _build_e2ee_entries(did)
     e2ee_signing_private_pem = e2ee_keys["key-2"][0]
-    e2ee_signing_public_pem = e2ee_keys["key-2"][1]
     e2ee_agreement_private_pem = e2ee_keys["key-3"][0]
-    e2ee_agreement_public_pem = e2ee_keys["key-3"][1]
     print("  key-2 (secp256r1 signing): generated")
     print("  key-3 (X25519 agreement): generated")
 
@@ -107,9 +107,13 @@ async def regenerate_e2ee_keys(
     # Replace key-2 and key-3 in verificationMethod
     vm_list = did_document.get("verificationMethod", [])
     # Remove old key-2 and key-3 entries
-    vm_list = [vm for vm in vm_list if not (
-        vm.get("id", "").endswith("#key-2") or vm.get("id", "").endswith("#key-3")
-    )]
+    vm_list = [
+        vm
+        for vm in vm_list
+        if not (
+            vm.get("id", "").endswith("#key-2") or vm.get("id", "").endswith("#key-3")
+        )
+    ]
     # Add new key-2 and key-3 entries
     vm_list.extend(e2ee_vms)
     did_document["verificationMethod"] = vm_list
@@ -139,9 +143,9 @@ async def regenerate_e2ee_keys(
     )
     print("  DID document re-signed with key-1")
 
-    # Step 4: Register on server and refresh JWT
+    # Step 4: Update DID document on server and refresh JWT
     config = SDKConfig()
-    print(f"\nRegistering updated DID document on server...")
+    print("\nUpdating DID document on server...")
     print(f"  Server: {config.user_service_url}")
 
     # Build a DIDIdentity for registration
@@ -161,12 +165,18 @@ async def regenerate_e2ee_keys(
     )
 
     async with create_user_service_client(config) as client:
-        reg_result = await register_did(client, identity)
-        print(f"  Registration: {reg_result.get('message', 'OK')}")
-        identity.user_id = reg_result.get("user_id", identity.user_id)
+        update_result = await update_did_document(
+            client,
+            identity,
+            config.did_domain,
+        )
+        print(f"  Update: {update_result.get('message', 'OK')}")
+        identity.user_id = update_result.get("user_id", identity.user_id)
 
-        # Refresh JWT
-        jwt_token = await get_jwt_via_wba(client, identity, config.did_domain)
+        # Refresh JWT (or reuse the token returned by update_document)
+        jwt_token = update_result.get("access_token")
+        if not jwt_token:
+            jwt_token = await get_jwt_via_wba(client, identity, config.did_domain)
         identity.jwt_token = jwt_token
         print(f"  JWT refreshed: {jwt_token[:50]}...")
 
@@ -193,11 +203,14 @@ def main() -> None:
         description="Regenerate E2EE keys for an existing DID identity"
     )
     parser.add_argument(
-        "--credential", type=str, default="default",
+        "--credential",
+        type=str,
+        default="default",
         help="Credential name (default: default)",
     )
     parser.add_argument(
-        "--force", action="store_true",
+        "--force",
+        action="store_true",
         help="Force regeneration even if E2EE keys already exist",
     )
     args = parser.parse_args()

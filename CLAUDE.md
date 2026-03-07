@@ -109,7 +109,7 @@ Three-layer architecture: CLI script layer -> Persistence layer -> Core utility 
 
 - **config.py**: `SDKConfig` dataclass, reads service addresses from environment variables. `credentials_dir` field resolves to `~/.openclaw/credentials/awiki-agent-id-message/`. `data_dir` field resolves via priority: `AWIKI_DATA_DIR` env (direct override) > `AWIKI_WORKSPACE/data/<skill>` > `~/.openclaw/workspace/data/<skill>`. `load()` class method reads `<DATA_DIR>/config/settings.json` with env var overrides
 - **identity.py**: `DIDIdentity` data class + `create_identity()` wrapping ANP's `create_did_wba_document_with_key_binding()`. Generates secp256k1 key pair + E2EE key pairs (key-2 secp256r1 for signing + key-3 X25519 for key agreement). Public key fingerprint auto-constructs key-bound DID path (k1_{fp}) + DID document + WBA proof
-- **auth.py**: Complete authentication pipeline — `create_authenticated_identity()` chains: create identity -> `register_did()` register -> `get_jwt_via_wba()` obtain JWT
+- **auth.py**: DID auth helpers — `create_authenticated_identity()` chains create identity -> `register_did()` -> `get_jwt_via_wba()` for first-time setup; `update_did_document()` uses DID WBA auth to update an existing DID document without re-registering
 - **client.py**: httpx AsyncClient factory (`create_user_service_client`, `create_molt_message_client`), 30s timeout, `trust_env=False`
 - **rpc.py**: JSON-RPC 2.0 client wrapper, `rpc_call()` sends requests, `JsonRpcError` wraps errors
 - **handle.py**: Handle (short name) registration and resolution — `send_otp()`, `register_handle()` (one-stop: create identity + register DID with handle + JWT), `resolve_handle()`, `lookup_handle()`. Uses `/user-service/handle/rpc` and `/user-service/did-auth/rpc` endpoints
