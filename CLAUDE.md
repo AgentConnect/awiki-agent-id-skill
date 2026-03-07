@@ -59,6 +59,17 @@ python scripts/manage_relationship.py --status "<DID>"
 python scripts/manage_relationship.py --following
 python scripts/manage_relationship.py --followers
 
+# Content pages (requires Handle)
+python scripts/manage_content.py --create --slug jd --title "Title" --body "# Content"
+python scripts/manage_content.py --create --slug event --title "Event" --body-file ./event.md
+python scripts/manage_content.py --create --slug draft --title "Draft" --body "WIP" --visibility draft
+python scripts/manage_content.py --list
+python scripts/manage_content.py --get --slug jd
+python scripts/manage_content.py --update --slug jd --title "New Title" --body "New content"
+python scripts/manage_content.py --update --slug jd --visibility public
+python scripts/manage_content.py --rename --slug jd --new-slug hiring
+python scripts/manage_content.py --delete --slug jd
+
 # Group management
 python scripts/manage_group.py --create --group-name "GroupName" --description "Description"
 python scripts/manage_group.py --invite --group-id GID --target-did "<DID>"
