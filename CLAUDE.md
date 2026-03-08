@@ -139,7 +139,8 @@ Three-layer architecture: CLI script layer -> Persistence layer -> Core utility 
 ### tests/ — Unit Tests
 
 - **test_local_store.py**: Local SQLite storage unit tests (schema, CRUD, idempotent dedup, thread_id generation, read-only SQL safety)
-- Listener and resolve tests have been migrated to `awiki-system-test/tests/` (listener/ and did/test_resolve.py).
+- Some repository-level integration coverage has been migrated to the sibling repository `../awiki-system-test/tests/` (for example `listener/`, `did/test_resolve.py`, and related CLI/DID suites).
+- When modifying feature behavior in this repository, also update the corresponding system tests in `../awiki-system-test/tests/`. Choose the suite that matches the changed module's parent area whenever possible, such as `tests/cli/`, `tests/did/`, or `tests/listener/`.
 
 ## Source File Header Convention
 
