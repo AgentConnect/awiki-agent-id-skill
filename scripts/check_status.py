@@ -6,7 +6,7 @@ Usage:
     python scripts/check_status.py --credential alice   # Specify credential
 
 [INPUT]: SDK (RPC calls, E2eeClient), credential_store (authenticator factory),
-         e2ee_store, logging_config
+         e2ee_store, credential_migration, logging_config
 [OUTPUT]: Structured JSON status report (identity + inbox + e2ee_auto + e2ee_sessions),
           with inbox refreshed after optional auto-processing
 [POS]: Unified status check entry point for Agent session startup and heartbeat calls
@@ -33,6 +33,7 @@ from utils import (
     authenticated_rpc_call,
 )
 from utils.logging_config import configure_logging
+from credential_migration import ensure_credential_storage_ready
 from credential_store import load_identity, create_authenticator
 from e2ee_store import load_e2ee_state, save_e2ee_state
 from e2ee_outbox import record_remote_failure
@@ -340,6 +341,19 @@ async def check_status(
     report: dict[str, Any] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+    report["credential_layout"] = ensure_credential_storage_ready(credential_name)
+    if not report["credential_layout"]["credential_ready"]:
+        report["identity"] = {
+            "status": "storage_migration_required",
+            "did": None,
+            "name": None,
+            "jwt_valid": False,
+            "error": "Credential storage migration failed or is incomplete",
+        }
+        report["inbox"] = {"status": "skipped", "total": 0}
+        report["e2ee_sessions"] = {"active": 0}
+        return report
 
     # 1. Identity check
     report["identity"] = await check_identity(credential_name)

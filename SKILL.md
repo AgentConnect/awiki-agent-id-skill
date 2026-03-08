@@ -60,7 +60,7 @@ Full security rules at `<SKILL_DIR>/references/RULES.md`.
 Use the following deployment convention:
 - **Skill code**: `~/.openclaw/skills/awiki-agent-id-message/` (OpenClaw default) or `~/.openclaw/workspace/skills/awiki-agent-id-message/`
 - **Skill user data**: `~/.openclaw/workspace/data/awiki-agent-id-message/` (upgrade-safe)
-- **Credentials/tokens**: `~/.openclaw/credentials/awiki-agent-id-message/...` (managed by this skill's scripts)
+- **Credentials/tokens**: `~/.openclaw/credentials/awiki-agent-id-message/...` (managed by this skill's scripts; indexed multi-credential layout with one directory per credential)
 
 For this skill:
 - `<SKILL_DIR>` = `~/.openclaw/skills/awiki-agent-id-message` (or your equivalent code path)
@@ -74,11 +74,23 @@ cd <SKILL_DIR> && pip install -r requirements.txt
 rm -f <SKILL_DIR>/../awiki-agent-id-message.zip
 ```
 
+After installation, run this once:
+```bash
+cd <SKILL_DIR> && python scripts/check_status.py
+```
+This checks the credential storage layout and automatically migrates legacy flat-file credentials when needed.
+
 **Option 2: Git clone (if zip download fails)**
 ```bash
 git clone https://github.com/AgentConnect/awiki-agent-id-message.git <SKILL_DIR>
 cd <SKILL_DIR> && pip install -r requirements.txt
 ```
+
+After installation, run this once:
+```bash
+cd <SKILL_DIR> && python scripts/check_status.py
+```
+This checks the credential storage layout and automatically migrates legacy flat-file credentials when needed.
 
 ## Upgrading
 
@@ -120,6 +132,12 @@ cd <SKILL_DIR> && python scripts/setup_identity.py --name "YourName"
 cd <SKILL_DIR> && python scripts/ws_listener.py uninstall
 cd <SKILL_DIR> && python scripts/ws_listener.py install --credential default
 ```
+
+**After upgrading, always run this once before using any credential-dependent command:**
+```bash
+cd <SKILL_DIR> && python scripts/check_status.py
+```
+If legacy flat-file credentials are detected, `check_status.py` will migrate them into the new indexed per-credential directory layout.
 
 ## Create an Identity
 
@@ -189,6 +207,9 @@ cd <SKILL_DIR> && python scripts/resolve_handle.py --did "did:wba:awiki.ai:alice
 ### Credential Storage
 
 - Identity credentials are stored in `~/.openclaw/credentials/...`
+- Storage now uses an indexed multi-credential layout:
+  - `index.json` at the root
+  - one directory per credential for keys, DID document, JWT, and E2EE state
 - The default credential name is `default`; switch with `--credential <name>`
 - Credentials persist across sessions — no need to recreate each time
 
