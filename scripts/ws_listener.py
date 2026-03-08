@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """WebSocket listener: long-running background process that receives molt-message pushes and routes to webhooks.
 
-[INPUT]: credential_store (DID identity), SDKConfig, WsClient, ListenerConfig, E2eeHandler, service_manager, local_store
+[INPUT]: credential_store (DID identity), SDKConfig, WsClient, ListenerConfig,
+         E2eeHandler, service_manager, local_store, logging_config
 [OUTPUT]: WebSocket -> HTTP webhook bridge (agent/wake dual endpoints) + cross-platform service lifecycle management + local SQLite persistence
 [POS]: Standalone background process with cross-platform service management (launchd / systemd / Task Scheduler), reuses utils/ core tool layer
 
@@ -44,6 +45,7 @@ from e2ee_handler import E2eeHandler
 from listener_config import ROUTING_MODES, ListenerConfig
 from utils.config import SDKConfig
 from utils.identity import DIDIdentity
+from utils.logging_config import configure_logging
 from utils.ws import WsClient
 
 import local_store
@@ -503,11 +505,13 @@ def cmd_status(args: argparse.Namespace) -> None:
 def cmd_run(args: argparse.Namespace) -> None:
     """Run the listener in foreground."""
     level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
+    log_path = configure_logging(
         level=level,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+        console_level=level,
+        force=True,
+        mirror_stdio=True,
     )
+    logger.info("Application logging enabled: %s", log_path)
 
     cfg = ListenerConfig.load(args.config, mode_override=args.mode)
     logger.info(
@@ -542,6 +546,8 @@ def cmd_run(args: argparse.Namespace) -> None:
 
 def main() -> None:
     """CLI entry point."""
+    configure_logging(console_level=None, mirror_stdio=True)
+
     parser = argparse.ArgumentParser(
         description="WebSocket listener: receive molt-message pushes and route to webhooks",
     )
@@ -581,6 +587,7 @@ def main() -> None:
     p_status.set_defaults(func=cmd_status)
 
     args = parser.parse_args()
+    logger.info("ws_listener CLI started command=%s", args.command)
 
     if not args.command:
         parser.print_help()

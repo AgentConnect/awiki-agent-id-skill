@@ -14,7 +14,7 @@ Usage:
     uv run python scripts/check_inbox.py --mark-read msg_id_1 msg_id_2
 
 [INPUT]: SDK (RPC calls), credential_store (load identity credentials), local_store,
-         E2EE runtime helpers and outbox tracking
+         E2EE runtime helpers, outbox tracking, logging_config
 [OUTPUT]: Inbox message list / chat history / mark-read result, with immediate
           private E2EE protocol processing and plaintext decryption when possible
 [POS]: Message receiving and processing script
@@ -38,8 +38,7 @@ from utils import (
     authenticated_rpc_call,
     resolve_to_did,
 )
-
-logger = logging.getLogger(__name__)
+from utils.logging_config import configure_logging
 from credential_store import create_authenticator, load_identity
 from e2ee_outbox import record_remote_failure
 from e2ee_store import load_e2ee_state, save_e2ee_state
@@ -49,6 +48,8 @@ from utils.e2ee import (
     build_e2ee_error_message,
 )
 import local_store
+
+logger = logging.getLogger(__name__)
 
 
 MESSAGE_RPC = "/message/rpc"
@@ -456,6 +457,9 @@ def _store_history_messages(
 
 
 def main() -> None:
+    configure_logging(level=logging.INFO, console_level=None, mirror_stdio=True)
+    logger.info("check_inbox CLI started")
+
     parser = argparse.ArgumentParser(description="Check inbox and manage messages")
     parser.add_argument("--history", type=str, help="View chat history with a specific DID or handle")
     parser.add_argument("--mark-read", nargs="+", type=str,

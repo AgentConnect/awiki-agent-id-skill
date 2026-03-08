@@ -16,7 +16,8 @@ Supported workflows:
 3. Alice: --send <Bob's DID> --content "secret" -> Send encrypted message
 4. Bob:   --process --peer <Alice's DID> -> Restore session from disk, decrypt message
 
-[INPUT]: SDK (E2eeClient, RPC calls), credential_store (load identity credentials), e2ee_store (E2EE state persistence)
+[INPUT]: SDK (E2eeClient, RPC calls), credential_store (load identity credentials),
+         e2ee_store (E2EE state persistence), logging_config
 [OUTPUT]: E2EE operation results with failure-aware inbox processing, sender-facing
           e2ee_error notifications, and state persistence
 [POS]: End-to-end encrypted messaging script, integrates state persistence for cross-process E2EE communication (HPKE scheme)
@@ -29,6 +30,7 @@ Supported workflows:
 import argparse
 import asyncio
 import json
+import logging
 import sys
 import uuid
 from pathlib import Path
@@ -40,6 +42,7 @@ from utils.e2ee import (
     build_e2ee_error_content,
     build_e2ee_error_message,
 )
+from utils.logging_config import configure_logging
 from credential_store import create_authenticator, load_identity
 from e2ee_store import save_e2ee_state, load_e2ee_state
 from e2ee_outbox import (
@@ -54,6 +57,7 @@ from e2ee_outbox import (
 
 
 MESSAGE_RPC = "/message/rpc"
+logger = logging.getLogger(__name__)
 
 # E2EE related message types
 _E2EE_MSG_TYPES = {"e2ee_init", "e2ee_ack", "e2ee_msg", "e2ee_rekey", "e2ee_error"}
@@ -405,6 +409,8 @@ async def process_inbox(
 
 
 def main() -> None:
+    configure_logging(console_level=None, mirror_stdio=True)
+
     parser = argparse.ArgumentParser(description="E2EE end-to-end encrypted messaging (HPKE scheme)")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--handshake", type=str, help="Initiate E2EE session with a specific DID or handle")
@@ -425,6 +431,18 @@ def main() -> None:
                         help="Credential name (default: default)")
 
     args = parser.parse_args()
+    logger.info(
+        "e2ee_messaging CLI started credential=%s action=%s",
+        args.credential,
+        (
+            "handshake" if args.handshake else
+            "send" if args.send else
+            "process" if args.process else
+            "list_failed" if args.list_failed else
+            "retry" if args.retry else
+            "drop"
+        ),
+    )
 
     if args.handshake:
         peer_did = asyncio.run(resolve_to_did(args.handshake))

@@ -5,7 +5,8 @@ Usage:
     python scripts/check_status.py --no-auto-e2ee      # Disable E2EE auto-processing
     python scripts/check_status.py --credential alice   # Specify credential
 
-[INPUT]: SDK (RPC calls, E2eeClient), credential_store (authenticator factory), e2ee_store
+[INPUT]: SDK (RPC calls, E2eeClient), credential_store (authenticator factory),
+         e2ee_store, logging_config
 [OUTPUT]: Structured JSON status report (identity + inbox + e2ee_auto + e2ee_sessions),
           with inbox refreshed after optional auto-processing
 [POS]: Unified status check entry point for Agent session startup and heartbeat calls
@@ -19,6 +20,7 @@ Usage:
 import argparse
 import asyncio
 import json
+import logging
 import sys
 from datetime import datetime, timezone
 from typing import Any
@@ -30,6 +32,7 @@ from utils import (
     create_molt_message_client,
     authenticated_rpc_call,
 )
+from utils.logging_config import configure_logging
 from credential_store import load_identity, create_authenticator
 from e2ee_store import load_e2ee_state, save_e2ee_state
 from e2ee_outbox import record_remote_failure
@@ -369,6 +372,8 @@ async def check_status(
 
 
 def main() -> None:
+    configure_logging(console_level=None, mirror_stdio=True)
+
     parser = argparse.ArgumentParser(description="Unified status check")
     parser.add_argument(
         "--no-auto-e2ee", action="store_true",
@@ -379,6 +384,11 @@ def main() -> None:
         help="Credential name (default: default)",
     )
     args = parser.parse_args()
+    logging.getLogger(__name__).info(
+        "check_status CLI started credential=%s auto_e2ee=%s",
+        args.credential,
+        not args.no_auto_e2ee,
+    )
 
     report = asyncio.run(check_status(args.credential, not args.no_auto_e2ee))
     print(json.dumps(report, indent=2, ensure_ascii=False))

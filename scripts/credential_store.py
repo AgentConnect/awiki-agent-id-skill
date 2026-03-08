@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import stat
 from datetime import datetime, timezone
@@ -20,6 +21,8 @@ from pathlib import Path
 from typing import Any
 
 from utils.config import SDKConfig
+
+logger = logging.getLogger(__name__)
 
 
 def _get_credentials_dir() -> Path:
@@ -103,6 +106,7 @@ def save_identity(
     path.write_text(json.dumps(credential_data, indent=2, ensure_ascii=False))
     # Set private key file permissions to 600 (only current user can read/write)
     os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+    logger.info("Saved credential name=%s did=%s path=%s", name, did, path)
     return path
 
 
@@ -117,8 +121,10 @@ def load_identity(name: str = "default") -> dict[str, Any] | None:
     """
     path = _credential_path(name)
     if path.exists():
+        logger.debug("Loading credential name=%s path=%s", name, path)
         return json.loads(path.read_text())
 
+    logger.debug("Credential not found name=%s path=%s", name, path)
     return None
 
 
@@ -146,6 +152,7 @@ def list_identities() -> list[dict[str, Any]]:
         except (json.JSONDecodeError, OSError):
             continue
 
+    logger.debug("Listed %d credentials from %s", len(identities), cred_dir)
     return identities
 
 
@@ -161,7 +168,9 @@ def delete_identity(name: str) -> bool:
     path = _credential_path(name)
     if path.exists():
         path.unlink()
+        logger.info("Deleted credential name=%s path=%s", name, path)
         return True
+    logger.debug("Delete skipped; credential not found name=%s path=%s", name, path)
     return False
 
 
@@ -177,12 +186,14 @@ def update_jwt(name: str, jwt_token: str) -> bool:
     """
     data = load_identity(name)
     if data is None:
+        logger.warning("Cannot update JWT; credential not found name=%s", name)
         return False
     data["jwt_token"] = jwt_token
     path = _credential_path(name)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
     os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+    logger.info("Updated JWT for credential name=%s path=%s", name, path)
     return True
 
 
@@ -197,6 +208,7 @@ def extract_auth_files(name: str = "default") -> tuple[Path, Path] | None:
     """
     data = load_identity(name)
     if data is None or not data.get("did_document"):
+        logger.debug("Auth file extraction skipped name=%s has_did_document=%s", name, bool(data and data.get("did_document")))
         return None
 
     cred_dir = _ensure_credentials_dir()
@@ -212,6 +224,7 @@ def extract_auth_files(name: str = "default") -> tuple[Path, Path] | None:
         private_key_pem = private_key_pem.encode("utf-8")
     key_path.write_bytes(private_key_pem)
     os.chmod(key_path, stat.S_IRUSR | stat.S_IWUSR)
+    logger.debug("Extracted auth files for credential name=%s", name)
 
     return (did_doc_path, key_path)
 
@@ -233,10 +246,12 @@ def create_authenticator(
 
     data = load_identity(name)
     if data is None:
+        logger.warning("Cannot create authenticator; credential not found name=%s", name)
         return None
 
     auth_files = extract_auth_files(name)
     if auth_files is None:
+        logger.warning("Cannot create authenticator; auth files missing name=%s", name)
         return None
 
     did_doc_path, key_path = auth_files
@@ -253,4 +268,5 @@ def create_authenticator(
                 {"Authorization": f"Bearer {data['jwt_token']}"},
             )
 
+    logger.debug("Created authenticator for credential name=%s did=%s", name, data.get("did"))
     return (auth, data)

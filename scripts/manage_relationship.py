@@ -16,7 +16,8 @@ Usage:
     # View followers list
     uv run python scripts/manage_relationship.py --followers
 
-[INPUT]: SDK (RPC calls), credential_store (load identity credentials)
+[INPUT]: SDK (RPC calls), credential_store (load identity credentials),
+         logging_config
 [OUTPUT]: Relationship operation results
 [POS]: Social relationship management script
 
@@ -28,18 +29,22 @@ Usage:
 import argparse
 import asyncio
 import json
+import logging
 import sys
 from pathlib import Path
 
 from utils import SDKConfig, create_user_service_client, authenticated_rpc_call, resolve_to_did
+from utils.logging_config import configure_logging
 from credential_store import create_authenticator
 
 
 RPC_ENDPOINT = "/user-service/did/relationships/rpc"
+logger = logging.getLogger(__name__)
 
 
 async def follow(target_did: str, credential_name: str = "default") -> None:
     """Follow a specific DID."""
+    logger.info("Following target=%s credential=%s", target_did, credential_name)
     config = SDKConfig()
     auth_result = create_authenticator(credential_name, config)
     if auth_result is None:
@@ -58,6 +63,7 @@ async def follow(target_did: str, credential_name: str = "default") -> None:
 
 async def unfollow(target_did: str, credential_name: str = "default") -> None:
     """Unfollow a specific DID."""
+    logger.info("Unfollowing target=%s credential=%s", target_did, credential_name)
     config = SDKConfig()
     auth_result = create_authenticator(credential_name, config)
     if auth_result is None:
@@ -76,6 +82,7 @@ async def unfollow(target_did: str, credential_name: str = "default") -> None:
 
 async def get_status(target_did: str, credential_name: str = "default") -> None:
     """View relationship status with a specific DID."""
+    logger.info("Fetching relationship status target=%s credential=%s", target_did, credential_name)
     config = SDKConfig()
     auth_result = create_authenticator(credential_name, config)
     if auth_result is None:
@@ -98,6 +105,7 @@ async def get_following(
     offset: int = 0,
 ) -> None:
     """View following list."""
+    logger.info("Fetching following list credential=%s limit=%d offset=%d", credential_name, limit, offset)
     config = SDKConfig()
     auth_result = create_authenticator(credential_name, config)
     if auth_result is None:
@@ -121,6 +129,7 @@ async def get_followers(
     offset: int = 0,
 ) -> None:
     """View followers list."""
+    logger.info("Fetching followers list credential=%s limit=%d offset=%d", credential_name, limit, offset)
     config = SDKConfig()
     auth_result = create_authenticator(credential_name, config)
     if auth_result is None:
@@ -139,6 +148,8 @@ async def get_followers(
 
 
 def main() -> None:
+    configure_logging(console_level=None, mirror_stdio=True)
+
     parser = argparse.ArgumentParser(description="Social relationship management")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--follow", type=str, help="Follow a specific DID or handle")
@@ -155,6 +166,7 @@ def main() -> None:
                         help="List offset (default: 0)")
 
     args = parser.parse_args()
+    logger.info("manage_relationship CLI started credential=%s", args.credential)
 
     if args.follow:
         target_did = asyncio.run(resolve_to_did(args.follow))

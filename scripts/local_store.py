@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import sqlite3
 import uuid
@@ -23,6 +24,8 @@ from pathlib import Path
 from typing import Any
 
 from utils.config import SDKConfig
+
+logger = logging.getLogger(__name__)
 
 # Current schema version (bump when schema changes)
 _SCHEMA_VERSION = 4
@@ -57,6 +60,7 @@ def get_connection() -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.row_factory = sqlite3.Row
+    logger.debug("Opened local SQLite database path=%s", db_path)
     return conn
 
 
@@ -68,7 +72,10 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     """
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version >= _SCHEMA_VERSION:
+        logger.debug("Local schema already up to date version=%d", version)
         return
+
+    logger.info("Migrating local schema from version=%d to version=%d", version, _SCHEMA_VERSION)
 
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS contacts (
@@ -236,6 +243,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
 
     conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
     conn.commit()
+    logger.info("Local schema migration complete version=%d", _SCHEMA_VERSION)
 
 
 def _normalize_credential_name(credential_name: str | None) -> str:
@@ -329,6 +337,13 @@ def store_message(
         ),
     )
     conn.commit()
+    logger.debug(
+        "Stored message msg_id=%s credential=%s direction=%d thread_id=%s",
+        msg_id,
+        normalized_credential_name,
+        direction,
+        thread_id,
+    )
 
 
 def store_messages_batch(
@@ -383,6 +398,11 @@ def store_messages_batch(
         rows,
     )
     conn.commit()
+    logger.debug(
+        "Stored message batch count=%d credential=%s",
+        len(rows),
+        _normalize_credential_name(credential_name),
+    )
 
 
 def queue_e2ee_outbox(
