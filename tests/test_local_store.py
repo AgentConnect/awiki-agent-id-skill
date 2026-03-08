@@ -55,14 +55,14 @@ class TestSchema:
 
     def test_schema_version(self, db):
         version = db.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 4
+        assert version == 5
 
     def test_ensure_schema_idempotent(self, db):
         """Calling ensure_schema multiple times is safe."""
         local_store.ensure_schema(db)
         local_store.ensure_schema(db)
         version = db.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 4
+        assert version == 5
 
     def test_wal_mode(self, db):
         mode = db.execute("PRAGMA journal_mode").fetchone()[0]

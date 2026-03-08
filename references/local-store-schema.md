@@ -40,6 +40,7 @@ Stores all messages (incoming and outgoing). The `credential_name` column distin
 | group_did | TEXT | | Group DID (for group messages) |
 | content_type | TEXT | DEFAULT 'text' | Content MIME type |
 | content | TEXT | | Message content |
+| title | TEXT | | Message title (optional, plaintext even for E2EE) |
 | server_seq | INTEGER | | Server-assigned sequence number |
 | sent_at | TEXT | | Server-side send timestamp (ISO 8601) |
 | stored_at | TEXT | NOT NULL | Local storage timestamp (ISO 8601) |
@@ -87,11 +88,13 @@ Thread IDs are deterministic and symmetric:
 
 ## Schema Versioning
 
-Schema version tracked via `PRAGMA user_version`. Current version: **3**.
+Schema version tracked via `PRAGMA user_version`. Current version: **5**.
 
 Migration history:
 - v1 → v2: adds `credential_name TEXT` column and `idx_messages_credential` index
 - v2 → v3: rebuilds `messages` so deduplication happens per `(msg_id, credential_name)`
+- v3 → v4: adds `e2ee_outbox` table for encrypted send tracking
+- v4 → v5: adds `title TEXT` column to `messages` table
 
 ## Safety Rules (execute_sql)
 

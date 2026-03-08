@@ -25,7 +25,7 @@ from typing import Any
 from utils.config import SDKConfig
 
 # Current schema version (bump when schema changes)
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 5
 
 # SQL patterns that are always forbidden
 _FORBIDDEN_PATTERNS = [
@@ -95,6 +95,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             group_did       TEXT,
             content_type    TEXT DEFAULT 'text',
             content         TEXT,
+            title           TEXT,
             server_seq      INTEGER,
             sent_at         TEXT,
             stored_at       TEXT NOT NULL,
@@ -206,6 +207,15 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                 ON messages(credential_name);
         """)
 
+    # Migration to v5: add title column to messages table.
+    if version == 4:
+        columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(messages)").fetchall()
+        }
+        if "title" not in columns:
+            conn.execute("ALTER TABLE messages ADD COLUMN title TEXT")
+
     # Views (DROP + CREATE to allow schema evolution)
     conn.executescript("""
         DROP VIEW IF EXISTS threads;
@@ -289,6 +299,7 @@ def store_message(
     sender_name: str | None = None,
     metadata: str | None = None,
     credential_name: str | None = None,
+    title: str | None = None,
 ) -> None:
     """Store a single message. Duplicates are ignored per (msg_id, credential_name).
 
@@ -317,13 +328,13 @@ def store_message(
     conn.execute(
         """INSERT OR IGNORE INTO messages
            (msg_id, thread_id, direction, sender_did, receiver_did,
-            group_id, group_did, content_type, content, server_seq,
+            group_id, group_did, content_type, content, title, server_seq,
             sent_at, stored_at, is_e2ee, is_read, sender_name, metadata,
             credential_name)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             msg_id, thread_id, direction, sender_did, receiver_did,
-            group_id, group_did, content_type, content, server_seq,
+            group_id, group_did, content_type, content, title, server_seq,
             sent_at, now, int(is_e2ee), int(is_read), sender_name, metadata,
             normalized_credential_name,
         ),
@@ -363,6 +374,7 @@ def store_messages_batch(
             msg.get("group_did"),
             msg.get("content_type", "text"),
             msg.get("content", ""),
+            msg.get("title"),
             msg.get("server_seq"),
             msg.get("sent_at"),
             now,
@@ -376,10 +388,10 @@ def store_messages_batch(
     conn.executemany(
         """INSERT OR IGNORE INTO messages
            (msg_id, thread_id, direction, sender_did, receiver_did,
-            group_id, group_did, content_type, content, server_seq,
+            group_id, group_did, content_type, content, title, server_seq,
             sent_at, stored_at, is_e2ee, is_read, sender_name, metadata,
             credential_name)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         rows,
     )
     conn.commit()

@@ -71,6 +71,7 @@ def mark_send_success(
     sent_server_seq: int | None,
     sent_at: str | None,
     client_msg_id: str,
+    title: str | None = None,
 ) -> None:
     """Persist a successful encrypted send into outbox and local messages."""
     conn = _open_db()
@@ -101,6 +102,7 @@ def mark_send_success(
             receiver_did=peer_did,
             content_type=original_type,
             content=plaintext,
+            title=title,
             server_seq=sent_server_seq,
             sent_at=sent_at,
             is_e2ee=True,

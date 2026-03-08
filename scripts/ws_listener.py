@@ -183,6 +183,8 @@ async def _forward(
             lines.append(f"sent_at: {params['sent_at']}")
         if params.get("_e2ee"):
             lines.append("e2ee: true")
+        if params.get("title"):
+            lines.append(f"title: {params['title']}")
         lines.append("")
         lines.append(content)
 
@@ -414,6 +416,7 @@ async def listen_loop(
                                 group_did=params.get("group_did"),
                                 content_type=params.get("type", "text"),
                                 content=str(params.get("content", "")),
+                                title=params.get("title"),
                                 server_seq=params.get("server_seq"),
                                 sent_at=params.get("sent_at"),
                                 is_e2ee=bool(params.get("_e2ee")),

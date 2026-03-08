@@ -48,6 +48,7 @@ python scripts/resolve_handle.py --did "<DID>"                # Look up handle b
 
 # Messaging (requires identity creation first)
 python scripts/send_message.py --to "<DID>" --content "hello"
+python scripts/send_message.py --to "<DID>" --content "hello" --title "Greeting"
 python scripts/check_inbox.py
 python scripts/check_inbox.py --history "<DID>"               # Chat history with a specific user
 python scripts/check_inbox.py --mark-read msg_id_1 msg_id_2
@@ -80,6 +81,7 @@ python scripts/manage_group.py --members --group-id GID
 python scripts/e2ee_messaging.py --handshake "<DID>"
 python scripts/e2ee_messaging.py --process --peer "<DID>"
 python scripts/e2ee_messaging.py --send "<DID>" --content "secret"
+python scripts/e2ee_messaging.py --send "<DID>" --content "secret" --title "Subject"
 
 # Unified status check
 python scripts/check_status.py                              # Default-on E2EE auto-processing
@@ -121,7 +123,7 @@ Three-layer architecture: CLI script layer -> Persistence layer -> Core utility 
 ### scripts/ — CLI Script Layer
 
 - **credential_store.py** / **e2ee_store.py**: Credential and E2EE state persistence to `~/.openclaw/credentials/awiki-agent-id-message/` directory (JSON format, 600 permissions)
-- **local_store.py**: SQLite local storage — contacts + messages + `e2ee_outbox` three tables, threads/inbox/outbox views. Single shared database at `<DATA_DIR>/database/awiki.db`. Messages are owned per credential via composite key `(msg_id, credential_name)` so the same server message can exist for multiple local identities. `e2ee_outbox` tracks encrypted send attempts, peer-side failures, and resend/drop decisions. WAL mode for concurrent read/write. Sync API (sqlite3 stdlib), ws_listener wraps via `asyncio.to_thread()`. Schema versioned via `PRAGMA user_version` (current: v4)
+- **local_store.py**: SQLite local storage — contacts + messages + `e2ee_outbox` three tables, threads/inbox/outbox views. Single shared database at `<DATA_DIR>/database/awiki.db`. Messages are owned per credential via composite key `(msg_id, credential_name)` so the same server message can exist for multiple local identities. `e2ee_outbox` tracks encrypted send attempts, peer-side failures, and resend/drop decisions. WAL mode for concurrent read/write. Sync API (sqlite3 stdlib), ws_listener wraps via `asyncio.to_thread()`. Schema versioned via `PRAGMA user_version` (current: v5)
 - **query_db.py**: Read-only SQL query CLI — accepts a SELECT statement, executes against local SQLite, returns JSON. Rejects write operations and multi-statement queries
 - **check_status.py**: Unified status check entry point — chains identity verification, inbox classification summary, and server_seq-aware E2EE auto-processing. Outputs structured JSON. Called by Agent session startup protocol and heartbeat
 - **listener_config.py**: `ListenerConfig` + `RoutingRules` — WebSocket listener configuration module. Defines dual webhook endpoints, routing modes (agent-all/smart/wake-all), message routing rules and E2EE transparent processing parameters. Supports unified settings.json (`listener` sub-object, at `<DATA_DIR>/config/settings.json`) + legacy JSON file + environment variables + CLI four-level override
