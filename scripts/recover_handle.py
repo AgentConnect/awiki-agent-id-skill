@@ -2,9 +2,12 @@
 
 Usage:
     uv run python scripts/recover_handle.py --handle alice --phone +8613800138000
+    uv run python scripts/recover_handle.py --handle alice --phone +8613800138000 --credential alice
+    uv run python scripts/recover_handle.py --handle alice --phone +8613800138000 --credential default --replace-existing
 
 [INPUT]: SDK (handle OTP + recovery RPC), credential_store, local_store, e2ee_store
-[OUTPUT]: Handle recovery result with local credential backup and cache migration
+[OUTPUT]: Handle recovery result with safe credential target selection, optional
+          credential replacement, and conditional local cache migration
 [POS]: Recovery CLI for users who lost the old DID private key but still control
        the original Handle phone number
 
@@ -34,6 +37,41 @@ from utils import SDKConfig, create_user_service_client, recover_handle, send_ot
 from utils.logging_config import configure_logging
 
 logger = logging.getLogger(__name__)
+
+
+def _allocate_recovery_credential_name(handle: str) -> str:
+    """Return a non-destructive credential name for a recovered Handle."""
+    candidate_names = [handle, f"{handle}_recovered"]
+    for candidate in candidate_names:
+        if load_identity(candidate) is None:
+            return candidate
+
+    suffix = 2
+    while True:
+        candidate = f"{handle}_recovered_{suffix}"
+        if load_identity(candidate) is None:
+            return candidate
+        suffix += 1
+
+
+def _resolve_recovery_target(
+    *,
+    handle: str,
+    requested_credential_name: str | None,
+    replace_existing: bool,
+) -> tuple[str, dict[str, Any] | None]:
+    """Resolve the credential target for recovery without implicit overwrites."""
+    if requested_credential_name is None:
+        return _allocate_recovery_credential_name(handle), None
+
+    existing_credential = load_identity(requested_credential_name)
+    if existing_credential is not None and not replace_existing:
+        raise ValueError(
+            f"Credential '{requested_credential_name}' already exists for DID "
+            f"{existing_credential.get('did')}; use a different --credential value "
+            "or pass --replace-existing to overwrite it intentionally."
+        )
+    return requested_credential_name, existing_credential
 
 
 def _migrate_local_cache(
@@ -73,17 +111,27 @@ async def do_recover(
     handle: str,
     phone: str,
     otp_code: str | None,
-    credential_name: str,
+    requested_credential_name: str | None,
+    replace_existing: bool,
 ) -> None:
     """Recover a Handle with phone OTP verification."""
+    credential_name, old_credential = _resolve_recovery_target(
+        handle=handle,
+        requested_credential_name=requested_credential_name,
+        replace_existing=replace_existing,
+    )
+    should_replace_existing = old_credential is not None and replace_existing
+
     logger.info(
-        "Recovering handle handle=%s credential=%s otp_provided=%s",
+        "Recovering handle handle=%s requested_credential=%s target_credential=%s "
+        "replace_existing=%s otp_provided=%s",
         handle,
+        requested_credential_name,
         credential_name,
+        should_replace_existing,
         otp_code is not None,
     )
     config = SDKConfig()
-    old_credential = load_identity(credential_name)
     old_did = str(old_credential["did"]) if old_credential and old_credential.get("did") else None
     old_unique_id = (
         str(old_credential["unique_id"])
@@ -109,7 +157,7 @@ async def do_recover(
             handle=handle,
         )
 
-    backup_path = backup_identity(credential_name) if old_credential is not None else None
+    backup_path = backup_identity(credential_name) if should_replace_existing else None
     if backup_path is not None:
         print(f"Existing credential backed up to: {backup_path}")
 
@@ -126,17 +174,17 @@ async def do_recover(
         did_document=identity.did_document,
         e2ee_signing_private_pem=identity.e2ee_signing_private_pem,
         e2ee_agreement_private_pem=identity.e2ee_agreement_private_pem,
-        replace_existing=True,
+        replace_existing=should_replace_existing,
     )
 
     cache_migration: dict[str, Any] | None = None
-    if old_did and old_did != identity.did:
+    if should_replace_existing and old_did and old_did != identity.did:
         cache_migration = _migrate_local_cache(
             credential_name=credential_name,
             old_did=old_did,
             new_did=identity.did,
         )
-    if old_unique_id and old_unique_id != identity.unique_id:
+    if should_replace_existing and old_unique_id and old_unique_id != identity.unique_id:
         prune_unreferenced_credential_dir(old_unique_id)
 
     print("Handle recovered successfully:")
@@ -147,7 +195,9 @@ async def do_recover(
                 "user_id": identity.user_id,
                 "handle": recover_result.get("handle", handle),
                 "full_handle": recover_result.get("full_handle"),
+                "requested_credential_name": requested_credential_name,
                 "credential_name": credential_name,
+                "replaced_existing_credential": should_replace_existing,
                 "message": recover_result.get("message", "OK"),
                 "local_backup_path": str(backup_path) if backup_path else None,
                 "local_cache_migration": cache_migration,
@@ -169,19 +219,34 @@ def main() -> None:
     parser.add_argument(
         "--credential",
         type=str,
-        default="default",
-        help="Credential storage name (default: default)",
+        default=None,
+        help=(
+            "Optional credential storage name for the recovered DID. "
+            "Defaults to a non-destructive name derived from the handle."
+        ),
+    )
+    parser.add_argument(
+        "--replace-existing",
+        action="store_true",
+        help=(
+            "Allow overwriting an existing credential selected via --credential. "
+            "Without this flag, recovery never replaces an existing local credential."
+        ),
     )
     args = parser.parse_args()
 
-    asyncio.run(
-        do_recover(
-            handle=args.handle,
-            phone=args.phone,
-            otp_code=args.otp_code,
-            credential_name=args.credential,
+    try:
+        asyncio.run(
+            do_recover(
+                handle=args.handle,
+                phone=args.phone,
+                otp_code=args.otp_code,
+                requested_credential_name=args.credential,
+                replace_existing=args.replace_existing,
+            )
         )
-    )
+    except ValueError as exc:
+        parser.exit(status=2, message=f"Error: {exc}\n")
 
 
 if __name__ == "__main__":
