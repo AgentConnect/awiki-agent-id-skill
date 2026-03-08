@@ -174,7 +174,7 @@ When modifying code logic, the corresponding file's `[INPUT]/[OUTPUT]/[POS]` hea
 
 **E2EE Failure Feedback**: Terminal decrypt failures, unsupported-version failures, and proof-expired/proof-from-future protocol failures are translated into `e2ee_error` responses. These responses should include `failed_msg_id` when the failing encrypted message is known, may include `failed_server_seq`, and expose a machine-readable `retry_hint`.
 
-**RPC Endpoint Paths**: Authentication via `/user-service/did-auth/rpc`, messaging via `/message/rpc`, Profile via `/user-service/profile/rpc`, groups/relationships via `/user-service/did/relationships/rpc`. The `/user-service` prefix supports nginx reverse proxy.
+**RPC Endpoint Paths**: Authentication via `/user-service/did-auth/rpc`, messaging via `/message/rpc`, Profile via `/user-service/profile/rpc`, groups/relationships via `/user-service/did/relationships/rpc`, content pages via `/content/rpc` (top-level, no `/user-service` prefix). Most endpoints use the `/user-service` prefix for nginx reverse proxy; content is the exception.
 
 ## Constraints
 

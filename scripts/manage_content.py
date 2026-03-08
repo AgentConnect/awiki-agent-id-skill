@@ -50,7 +50,7 @@ from utils import SDKConfig, create_user_service_client, authenticated_rpc_call
 from credential_store import create_authenticator
 
 
-CONTENT_RPC = "/user-service/content/rpc"
+CONTENT_RPC = "/content/rpc"
 
 
 async def create_page(
