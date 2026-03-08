@@ -62,6 +62,7 @@ logger = logging.getLogger(__name__)
 # E2EE related message types
 _E2EE_MSG_TYPES = {"e2ee_init", "e2ee_ack", "e2ee_msg", "e2ee_rekey", "e2ee_error"}
 _E2EE_SESSION_SETUP_TYPES = {"e2ee_init", "e2ee_rekey"}
+_E2EE_USER_NOTICE = "This is an encrypted message."
 
 # E2EE message type protocol order
 _E2EE_TYPE_ORDER = {"e2ee_init": 0, "e2ee_ack": 1, "e2ee_rekey": 2, "e2ee_msg": 3, "e2ee_error": 4}
@@ -80,6 +81,11 @@ def _message_sort_key(message: dict[str, Any]) -> tuple[Any, ...]:
         message.get("created_at", ""),
         _E2EE_TYPE_ORDER.get(message.get("type"), 99),
     )
+
+
+def _render_user_visible_e2ee_text(plaintext: str) -> str:
+    """Render the minimal user-facing text for a decrypted E2EE message."""
+    return f"{_E2EE_USER_NOTICE}\n{plaintext}"
 
 
 def _classify_decrypt_error(exc: BaseException) -> tuple[str, str]:
@@ -316,10 +322,19 @@ async def process_inbox(
                 if msg_type == "e2ee_msg":
                     try:
                         original_type, plaintext = e2ee_client.decrypt_message(content)
-                        print(f"  [{msg_type}] Decrypted message: [{original_type}] {plaintext}")
+                        logger.info(
+                            "Decrypted E2EE inbox message sender=%s original_type=%s",
+                            sender_did,
+                            original_type,
+                        )
+                        print(_render_user_visible_e2ee_text(plaintext))
                         processed_ok = True
                     except Exception as e:
-                        print(f"  [{msg_type}] Decryption failed: {e}")
+                        logger.warning(
+                            "Failed to decrypt E2EE inbox message sender=%s error=%s",
+                            sender_did,
+                            e,
+                        )
                         error_code, retry_hint = _classify_decrypt_error(e)
                         error_content = build_e2ee_error_content(
                             error_code=error_code,
@@ -338,10 +353,6 @@ async def process_inbox(
                             client, data["did"], sender_did, "e2ee_error", error_content,
                             auth=auth, credential_name=credential_name,
                         )
-                        print(
-                            f"    -> Sent e2ee_error "
-                            f"(failed_msg_id={msg.get('id')}, retry_hint={retry_hint})"
-                        )
                 else:
                     if msg_type == "e2ee_error":
                         matched_outbox_id = record_remote_failure(
@@ -350,9 +361,10 @@ async def process_inbox(
                             content=content,
                         )
                         if matched_outbox_id:
-                            print(
-                                f"  [{msg_type}] Matched failed local outbox: "
-                                f"{matched_outbox_id}"
+                            logger.info(
+                                "Matched failed E2EE outbox sender=%s outbox_id=%s",
+                                sender_did,
+                                matched_outbox_id,
                             )
                     responses = await e2ee_client.process_e2ee_message(msg_type, content)
                     session_ready = True
@@ -361,29 +373,23 @@ async def process_inbox(
                     )
                     if msg_type in _E2EE_SESSION_SETUP_TYPES:
                         session_ready = e2ee_client.has_session_id(content.get("session_id"))
+                    logger.info(
+                        "Processed E2EE protocol message type=%s sender=%s responses=%d session_ready=%s terminal_error_notified=%s",
+                        msg_type,
+                        sender_did,
+                        len(responses),
+                        session_ready,
+                        terminal_error_notified,
+                    )
                     if session_ready:
-                        print(
-                            f"  [{msg_type}] Processed protocol message, generated "
-                            f"{len(responses)} response(s)"
-                        )
                         processed_ok = True
                     elif terminal_error_notified:
-                        print(
-                            f"  [{msg_type}] Protocol message failed terminally; "
-                            "sender notified via e2ee_error"
-                        )
                         processed_ok = True
-                    else:
-                        print(
-                            f"  [{msg_type}] Protocol message did not activate a session; "
-                            "left unread for inspection"
-                        )
                     for resp_type, resp_content in responses:
                         await _send_msg(
                             client, data["did"], peer_did, resp_type, resp_content,
                             auth=auth, credential_name=credential_name,
                         )
-                        print(f"    -> Sent {resp_type}")
             else:
                 print(f"  [{msg_type}] From {sender_did[:40]}...: {msg['content']}")
                 processed_ok = True
@@ -398,10 +404,7 @@ async def process_inbox(
                 params={"user_did": data["did"], "message_ids": processed_ids},
                 auth=auth, credential_name=credential_name,
             )
-            print(f"\nMarked {len(processed_ids)} message(s) as read")
-
-        if e2ee_client and e2ee_client.has_active_session(peer_did):
-            print(f"\nE2EE session status: ACTIVE (with {peer_did})")
+            logger.info("Marked %d E2EE inbox message(s) as read", len(processed_ids))
 
         # Save E2EE client state to disk
         if e2ee_client is not None:

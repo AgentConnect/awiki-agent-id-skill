@@ -41,6 +41,7 @@ from e2ee_outbox import record_remote_failure
 
 MESSAGE_RPC = "/message/rpc"
 AUTH_RPC = "/user-service/did-auth/rpc"
+logger = logging.getLogger(__name__)
 
 # E2EE protocol message types
 _E2EE_HANDSHAKE_TYPES = {"e2ee_init", "e2ee_ack", "e2ee_rekey", "e2ee_error"}
@@ -62,6 +63,11 @@ def _message_sort_key(message: dict[str, Any]) -> tuple[Any, ...]:
         message.get("created_at", ""),
         _E2EE_TYPE_ORDER.get(message.get("type"), 99),
     )
+
+
+def _is_user_visible_message_type(msg_type: str) -> bool:
+    """Return whether a message type should be exposed to end users."""
+    return msg_type not in _E2EE_MSG_TYPES
 
 
 # ---------- E2EE helpers ----------
@@ -180,15 +186,19 @@ async def summarize_inbox(
 
     messages = inbox.get("messages", [])
 
-    # Count by type
+    # Count only user-visible messages. Protocol and encrypted transport
+    # messages are internal and should not be surfaced directly to users.
     by_type: dict[str, int] = {}
     text_by_sender: dict[str, dict[str, Any]] = {}
-    e2ee_init_pending: list[str] = []
-    e2ee_encrypted_from: list[str] = []
     text_count = 0
+    visible_total = 0
 
     for msg in messages:
         msg_type = msg.get("type", "unknown")
+        if not _is_user_visible_message_type(msg_type):
+            continue
+
+        visible_total += 1
         sender_did = msg.get("sender_did", "unknown")
         created_at = msg.get("created_at", "")
 
@@ -201,22 +211,13 @@ async def summarize_inbox(
             text_by_sender[sender_did]["count"] += 1
             if created_at > text_by_sender[sender_did]["latest"]:
                 text_by_sender[sender_did]["latest"] = created_at
-        elif msg_type == "e2ee_init":
-            if sender_did not in e2ee_init_pending:
-                e2ee_init_pending.append(sender_did)
-        elif msg_type == "e2ee_msg":
-            if sender_did not in e2ee_encrypted_from:
-                e2ee_encrypted_from.append(sender_did)
 
     return {
         "status": "ok",
-        "total": len(messages),
+        "total": visible_total,
         "by_type": by_type,
         "text_messages": text_count,
         "text_by_sender": text_by_sender,
-        "e2ee_handshake_pending": e2ee_init_pending,
-        "e2ee_encrypted_from": e2ee_encrypted_from,
-        "has_pending_handshakes": len(e2ee_init_pending) > 0,
     }
 
 
@@ -247,13 +248,12 @@ async def auto_process_e2ee(
             ]
 
             if not e2ee_msgs:
-                return {"status": "ok", "processed": 0, "details": []}
+                return {"status": "ok"}
 
             # Sort by sender stream + server_seq, fallback to created_at.
             e2ee_msgs.sort(key=_message_sort_key)
 
             e2ee_client = _load_or_create_e2ee_client(data["did"], credential_name)
-            details: list[dict[str, Any]] = []
             processed_ids: list[str] = []
 
             for msg in e2ee_msgs:
@@ -283,34 +283,16 @@ async def auto_process_e2ee(
                         )
 
                     if session_ready:
-                        details.append({
-                            "msg_type": msg_type,
-                            "sender_did": sender_did,
-                            "responses_sent": len(responses),
-                            "status": "processed",
-                        })
                         processed_ids.append(msg["id"])
                     elif terminal_error_notified:
-                        details.append({
-                            "msg_type": msg_type,
-                            "sender_did": sender_did,
-                            "responses_sent": len(responses),
-                            "status": "error_notified",
-                        })
                         processed_ids.append(msg["id"])
-                    else:
-                        details.append({
-                            "msg_type": msg_type,
-                            "sender_did": sender_did,
-                            "responses_sent": len(responses),
-                            "status": "session_not_activated",
-                        })
                 except Exception as e:
-                    details.append({
-                        "msg_type": msg_type,
-                        "sender_did": sender_did,
-                        "error": str(e),
-                    })
+                    logger.warning(
+                        "E2EE auto-processing failed type=%s sender=%s error=%s",
+                        msg_type,
+                        sender_did,
+                        e,
+                    )
 
             # Mark processed messages as read
             if processed_ids:
@@ -325,12 +307,10 @@ async def auto_process_e2ee(
 
             return {
                 "status": "ok",
-                "processed": len(processed_ids),
-                "details": details,
             }
 
     except Exception as e:
-        return {"status": "error", "processed": 0, "details": [], "error": str(e)}
+        return {"status": "error", "error": str(e)}
 
 
 async def check_status(

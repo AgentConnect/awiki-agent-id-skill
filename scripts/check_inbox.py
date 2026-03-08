@@ -56,6 +56,7 @@ MESSAGE_RPC = "/message/rpc"
 _E2EE_MSG_TYPES = {"e2ee_init", "e2ee_ack", "e2ee_msg", "e2ee_rekey", "e2ee_error"}
 _E2EE_SESSION_SETUP_TYPES = {"e2ee_init", "e2ee_rekey"}
 _E2EE_TYPE_ORDER = {"e2ee_init": 0, "e2ee_ack": 1, "e2ee_rekey": 2, "e2ee_msg": 3, "e2ee_error": 4}
+_E2EE_USER_NOTICE = "This is an encrypted message."
 
 
 def _message_sort_key(message: dict[str, Any]) -> tuple[Any, ...]:
@@ -71,6 +72,21 @@ def _message_sort_key(message: dict[str, Any]) -> tuple[Any, ...]:
         message.get("created_at", ""),
         _E2EE_TYPE_ORDER.get(message.get("type"), 99),
     )
+
+
+def _decorate_user_visible_e2ee_message(
+    message: dict[str, Any],
+    *,
+    original_type: str,
+    plaintext: str,
+) -> dict[str, Any]:
+    """Decorate a decrypted E2EE message for user-facing output."""
+    rendered = dict(message)
+    rendered["type"] = original_type
+    rendered["content"] = plaintext
+    rendered["_e2ee"] = True
+    rendered["_e2ee_notice"] = _E2EE_USER_NOTICE
+    return rendered
 
 
 def _load_or_create_e2ee_client(local_did: str, credential_name: str) -> E2eeClient:
@@ -162,10 +178,11 @@ async def _auto_process_e2ee_messages(
                     continue
                 try:
                     original_type, plaintext = e2ee_client.decrypt_message(content)
-                    rendered = dict(msg)
-                    rendered["type"] = original_type
-                    rendered["content"] = plaintext
-                    rendered["_e2ee"] = True
+                    rendered = _decorate_user_visible_e2ee_message(
+                        msg,
+                        original_type=original_type,
+                        plaintext=plaintext,
+                    )
                     rendered_messages.append(rendered)
                     processed_ids.append(msg["id"])
                 except Exception as exc:
@@ -242,11 +259,11 @@ def _render_local_outgoing_e2ee_message(
     if stored is None or not stored.get("is_e2ee"):
         return None
 
-    rendered = dict(message)
-    rendered["type"] = stored.get("content_type", message.get("type"))
-    rendered["content"] = stored.get("content", message.get("content"))
-    rendered["_e2ee"] = True
-    return rendered
+    return _decorate_user_visible_e2ee_message(
+        message,
+        original_type=stored.get("content_type", message.get("type", "text")),
+        plaintext=stored.get("content", message.get("content", "")),
+    )
 
 
 async def check_inbox(credential_name: str = "default", limit: int = 20) -> None:

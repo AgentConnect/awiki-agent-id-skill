@@ -166,7 +166,7 @@ async def _forward(
     if route == "agent":
         # Build structured message with full ANP notification fields
         context = "DM" if is_private else "Group"
-        lines = [f"[IM {context}] New message"]
+        lines = [f"[IM {context}] New {'encrypted ' if params.get('_e2ee') else ''}message"]
         lines.append(f"sender_did: {sender_did}")
         if params.get("sender_name"):
             lines.append(f"sender_name: {params['sender_name']}")
@@ -186,6 +186,9 @@ async def _forward(
         if params.get("_e2ee"):
             lines.append("e2ee: true")
         lines.append("")
+        if params.get("_e2ee"):
+            lines.append(str(params.get("_e2ee_notice", "This is an encrypted message.")))
+            lines.append("")
         lines.append(content)
 
         body: dict[str, Any] = {
@@ -197,7 +200,11 @@ async def _forward(
     else:
         # OpenClaw /hooks/wake format
         body = {
-            "text": f"[IM] {sender}: {content_preview}",
+            "text": (
+                f"[IM] {sender}: [Encrypted] {content_preview}"
+                if params.get("_e2ee")
+                else f"[IM] {sender}: {content_preview}"
+            ),
             "mode": "next-heartbeat",
         }
 
