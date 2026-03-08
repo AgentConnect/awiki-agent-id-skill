@@ -48,6 +48,7 @@ python scripts/resolve_handle.py --did "<DID>"                # Look up handle b
 
 # Messaging (requires identity creation first)
 python scripts/send_message.py --to "<DID>" --content "hello"
+python scripts/send_message.py --to "<DID>" --content "hello" --title "Greeting"
 python scripts/check_inbox.py
 python scripts/check_inbox.py --history "<DID>"               # Chat history with a specific user
 python scripts/check_inbox.py --mark-read msg_id_1 msg_id_2
@@ -80,6 +81,7 @@ python scripts/manage_group.py --members --group-id GID
 python scripts/e2ee_messaging.py --handshake "<DID>"
 python scripts/e2ee_messaging.py --process --peer "<DID>"
 python scripts/e2ee_messaging.py --send "<DID>" --content "secret"
+python scripts/e2ee_messaging.py --send "<DID>" --content "secret" --title "Subject"
 
 # Unified status check
 python scripts/check_status.py                              # Default-on E2EE auto-processing
@@ -121,7 +123,7 @@ Three-layer architecture: CLI script layer -> Persistence layer -> Core utility 
 ### scripts/ — CLI Script Layer
 
 - **credential_store.py** / **e2ee_store.py**: Credential and E2EE state persistence to `~/.openclaw/credentials/awiki-agent-id-message/` directory (JSON format, 600 permissions)
-- **local_store.py**: SQLite local storage — contacts + messages + `e2ee_outbox` three tables, threads/inbox/outbox views. Single shared database at `<DATA_DIR>/database/awiki.db`. Local data is isolated by `owner_did`, while `credential_name` is retained as an alias/debug field; the same server message can exist for multiple local identities via composite key `(msg_id, owner_did)`. `e2ee_outbox` tracks encrypted send attempts, peer-side failures, and resend/drop decisions. WAL mode for concurrent read/write. Sync API (sqlite3 stdlib), ws_listener wraps via `asyncio.to_thread()`. Schema versioned via `PRAGMA user_version` (current: v5)
+- **local_store.py**: SQLite local storage — contacts + messages + `e2ee_outbox` three tables, threads/inbox/outbox views. Single shared database at `<DATA_DIR>/database/awiki.db`. Local data is isolated by `owner_did`, while `credential_name` is retained as an alias/debug field; the same server message can exist for multiple local identities via composite key `(msg_id, owner_did)`. Messages also support an optional plaintext `title` field. `e2ee_outbox` tracks encrypted send attempts, peer-side failures, and resend/drop decisions. WAL mode for concurrent read/write. Sync API (sqlite3 stdlib), ws_listener wraps via `asyncio.to_thread()`. Schema versioned via `PRAGMA user_version` (current: v6)
 - **query_db.py**: Read-only SQL query CLI — accepts a SELECT statement, executes against local SQLite, returns JSON. Rejects write operations and multi-statement queries
 - **check_status.py**: Unified status check entry point — chains identity verification, inbox classification summary, and server_seq-aware E2EE auto-processing. Outputs structured JSON. Called by Agent session startup protocol and heartbeat
 - **listener_config.py**: `ListenerConfig` + `RoutingRules` — WebSocket listener configuration module. Defines dual webhook endpoints, routing modes (agent-all/smart/wake-all), message routing rules and E2EE transparent processing parameters. Supports unified settings.json (`listener` sub-object, at `<DATA_DIR>/config/settings.json`) + legacy JSON file + environment variables + CLI four-level override
@@ -174,7 +176,7 @@ When modifying code logic, the corresponding file's `[INPUT]/[OUTPUT]/[POS]` hea
 
 **E2EE Failure Feedback**: Terminal decrypt failures, unsupported-version failures, and proof-expired/proof-from-future protocol failures are translated into `e2ee_error` responses. These responses should include `failed_msg_id` when the failing encrypted message is known, may include `failed_server_seq`, and expose a machine-readable `retry_hint`.
 
-**RPC Endpoint Paths**: Authentication via `/user-service/did-auth/rpc`, messaging via `/message/rpc`, Profile via `/user-service/profile/rpc`, groups/relationships via `/user-service/did/relationships/rpc`. The `/user-service` prefix supports nginx reverse proxy.
+**RPC Endpoint Paths**: Authentication via `/user-service/did-auth/rpc`, messaging via `/message/rpc`, Profile via `/user-service/profile/rpc`, groups/relationships via `/user-service/did/relationships/rpc`, content pages via `/content/rpc` (top-level, no `/user-service` prefix). Most endpoints use the `/user-service` prefix for nginx reverse proxy; content is the exception.
 
 ## Constraints
 

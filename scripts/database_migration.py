@@ -56,7 +56,7 @@ def detect_local_database_layout(config: SDKConfig | None = None) -> dict[str, A
         conn.close()
 
     return {
-        "status": "legacy" if version < 5 else "ready",
+        "status": "legacy" if version < 6 else "ready",
         "db_path": str(db_path),
         "before_version": version,
     }

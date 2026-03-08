@@ -52,18 +52,32 @@ class TestSchema:
 
     def test_schema_version(self, db):
         version = db.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 5
+        assert version == 6
 
-    def test_owner_did_columns_exist(self, db):
+    def test_ensure_schema_idempotent(self, db):
+        """Calling ensure_schema multiple times is safe."""
+        local_store.ensure_schema(db)
+        local_store.ensure_schema(db)
+        version = db.execute("PRAGMA user_version").fetchone()[0]
+        assert version == 6
+
+    def test_wal_mode(self, db):
+        mode = db.execute("PRAGMA journal_mode").fetchone()[0]
+        assert mode == "wal"
+
+    def test_credential_name_column_exists(self, db):
+        message_columns = {
+            row[1]
+            for row in db.execute("PRAGMA table_info(messages)").fetchall()
+        }
         contact_columns = {
             row[1] for row in db.execute("PRAGMA table_info(contacts)").fetchall()
-        }
-        message_columns = {
-            row[1] for row in db.execute("PRAGMA table_info(messages)").fetchall()
         }
         outbox_columns = {
             row[1] for row in db.execute("PRAGMA table_info(e2ee_outbox)").fetchall()
         }
+        assert "credential_name" in message_columns
+        assert "title" in message_columns
         assert "owner_did" in contact_columns
         assert "owner_did" in message_columns
         assert "owner_did" in outbox_columns
@@ -540,7 +554,7 @@ class TestMigration:
         ).fetchone()
         conn.close()
 
-        assert version == 5
+        assert version == 6
         assert migrated_message["owner_did"] == "did:alice"
         assert migrated_contact["owner_did"] == "did:alice"
         assert migrated_outbox["owner_did"] == "did:alice"

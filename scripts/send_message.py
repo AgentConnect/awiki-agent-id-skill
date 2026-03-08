@@ -4,13 +4,17 @@ Usage:
     # Send a text message
     uv run python scripts/send_message.py --to "did:wba:localhost:user:abc123" --content "Hello!"
 
+    # Send with a title
+    uv run python scripts/send_message.py --to "did:wba:localhost:user:abc123" --content "Hello!" --title "Greeting"
+
     # Specify message type
     uv run python scripts/send_message.py --to "did:wba:localhost:user:abc123" --content "hello" --type text
 
 [INPUT]: SDK (RPC calls), credential_store (load identity credentials),
          local_store (local persistence), logging_config
 [OUTPUT]: Send result (with server_seq and client_msg_id)
-[POS]: Message sending script, auto-generates client_msg_id for idempotent delivery
+[POS]: Message sending script, auto-generates client_msg_id for idempotent delivery.
+       Supports optional title field (plaintext, not encrypted even for E2EE messages).
 
 [PROTOCOL]:
 1. Update this header when logic changes
@@ -40,6 +44,7 @@ async def send_message(
     content: str,
     msg_type: str = "text",
     credential_name: str = "default",
+    title: str | None = None,
 ) -> None:
     """Send a message to a specified DID or handle."""
     config = SDKConfig()
@@ -64,11 +69,14 @@ async def send_message(
             MESSAGE_RPC,
             "send",
             params={
-                "sender_did": data["did"],
-                "receiver_did": receiver_did,
-                "content": content,
-                "type": msg_type,
-                "client_msg_id": str(uuid.uuid4()),
+                k: v for k, v in {
+                    "sender_did": data["did"],
+                    "receiver_did": receiver_did,
+                    "content": content,
+                    "title": title,
+                    "type": msg_type,
+                    "client_msg_id": str(uuid.uuid4()),
+                }.items() if v is not None
             },
             auth=auth,
             credential_name=credential_name,
@@ -90,6 +98,7 @@ async def send_message(
                 receiver_did=receiver_did,
                 content_type=msg_type,
                 content=content,
+                title=title,
                 server_seq=result.get("server_seq"),
                 sent_at=result.get("sent_at"),
                 credential_name=credential_name,
@@ -126,6 +135,8 @@ def main() -> None:
     parser.add_argument("--content", required=True, type=str, help="Message content")
     parser.add_argument("--type", type=str, default="text",
                         help="Message type (default: text)")
+    parser.add_argument("--title", type=str, default=None,
+                        help="Message title (optional, plaintext even for E2EE)")
     parser.add_argument("--credential", type=str, default="default",
                         help="Credential name (default: default)")
 
@@ -136,7 +147,7 @@ def main() -> None:
         args.to,
         args.type,
     )
-    asyncio.run(send_message(args.to, args.content, args.type, args.credential))
+    asyncio.run(send_message(args.to, args.content, args.type, args.credential, title=args.title))
 
 
 if __name__ == "__main__":

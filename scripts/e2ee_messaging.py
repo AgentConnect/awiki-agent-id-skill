@@ -149,21 +149,25 @@ async def _send_msg(
     auth,
     credential_name="default",
     client_msg_id: str | None = None,
+    title: str | None = None,
 ):
     """Send a message (E2EE or plain)."""
     if isinstance(content, dict):
         content = json.dumps(content)
     if client_msg_id is None:
         client_msg_id = str(uuid.uuid4())
+    params = {
+        "sender_did": sender_did,
+        "receiver_did": receiver_did,
+        "content": content,
+        "type": msg_type,
+        "client_msg_id": client_msg_id,
+    }
+    if title is not None:
+        params["title"] = title
     return await authenticated_rpc_call(
         client, MESSAGE_RPC, "send",
-        params={
-            "sender_did": sender_did,
-            "receiver_did": receiver_did,
-            "content": content,
-            "type": msg_type,
-            "client_msg_id": client_msg_id,
-        },
+        params=params,
         auth=auth,
         credential_name=credential_name,
     )
@@ -202,6 +206,7 @@ async def send_encrypted(
     credential_name: str = "default",
     original_type: str = "text",
     outbox_id: str | None = None,
+    title: str | None = None,
 ) -> None:
     """Send an encrypted message."""
     config = SDKConfig()
@@ -243,6 +248,7 @@ async def send_encrypted(
                 auth=auth,
                 credential_name=credential_name,
                 client_msg_id=send_client_msg_id,
+                title=title,
             )
         except Exception as exc:
             record_local_failure(
@@ -267,6 +273,7 @@ async def send_encrypted(
             sent_server_seq=send_result.get("server_seq"),
             sent_at=send_result.get("sent_at"),
             client_msg_id=send_client_msg_id,
+            title=title,
         )
 
     # Save state (send_seq incremented)
@@ -428,6 +435,8 @@ def main() -> None:
                        help="Mark a failed local E2EE outbox record as dropped")
 
     parser.add_argument("--content", type=str, help="Message content (required with --send)")
+    parser.add_argument("--title", type=str, default=None,
+                        help="Message title (optional, plaintext even for E2EE)")
     parser.add_argument("--peer", type=str,
                         help="Peer DID or handle (required with --process)")
     parser.add_argument("--credential", type=str, default="default",
@@ -454,7 +463,7 @@ def main() -> None:
         if not args.content:
             parser.error("Sending encrypted message requires --content")
         peer_did = asyncio.run(resolve_to_did(args.send))
-        asyncio.run(send_encrypted(peer_did, args.content, args.credential))
+        asyncio.run(send_encrypted(peer_did, args.content, args.credential, title=args.title))
     elif args.process:
         if not args.peer:
             parser.error("Processing inbox requires --peer")

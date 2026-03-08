@@ -5,7 +5,7 @@
 [OUTPUT]: get_connection(), ensure_schema(), store_message(), store_messages_batch(),
          queue_e2ee_outbox(), mark_e2ee_outbox_sent(), mark_e2ee_outbox_failed(),
          list_e2ee_outbox(), get_e2ee_outbox(), get_message_by_id(), make_thread_id(),
-         upsert_contact(), execute_sql()
+         upsert_contact(), rebind_owner_did(), clear_owner_e2ee_data(), execute_sql()
 [POS]: Persistence layer — single shared SQLite database for offline message storage,
        contact management, and resendable E2EE outbox tracking with explicit
        owner_did isolation for multi-identity local environments
@@ -30,7 +30,7 @@ from utils.config import SDKConfig
 
 logger = logging.getLogger(__name__)
 
-_SCHEMA_VERSION = 5
+_SCHEMA_VERSION = 6
 
 _FORBIDDEN_PATTERNS = [
     re.compile(r"\bDROP\b", re.IGNORECASE),
@@ -73,9 +73,10 @@ def _normalize_owner_did(owner_did: str | None) -> str:
     return owner_did or ""
 
 
-def _create_schema_v5(conn: sqlite3.Connection) -> None:
+def _create_schema_v6(conn: sqlite3.Connection) -> None:
     """Create the owner_did-aware schema."""
-    conn.executescript("""
+    conn.executescript(
+        """
         CREATE TABLE IF NOT EXISTS contacts (
             owner_did       TEXT NOT NULL DEFAULT '',
             did             TEXT NOT NULL,
@@ -103,6 +104,7 @@ def _create_schema_v5(conn: sqlite3.Connection) -> None:
             group_did       TEXT,
             content_type    TEXT DEFAULT 'text',
             content         TEXT,
+            title           TEXT,
             server_seq      INTEGER,
             sent_at         TEXT,
             stored_at       TEXT NOT NULL,
@@ -156,9 +158,11 @@ def _create_schema_v5(conn: sqlite3.Connection) -> None:
             ON e2ee_outbox(owner_did, peer_did, sent_server_seq);
         CREATE INDEX IF NOT EXISTS idx_e2ee_outbox_credential
             ON e2ee_outbox(credential_name);
-    """)
+        """
+    )
 
-    conn.executescript("""
+    conn.executescript(
+        """
         DROP VIEW IF EXISTS threads;
         CREATE VIEW threads AS
         SELECT
@@ -185,7 +189,8 @@ def _create_schema_v5(conn: sqlite3.Connection) -> None:
         CREATE VIEW outbox AS
         SELECT * FROM messages WHERE direction = 1
         ORDER BY owner_did, COALESCE(sent_at, stored_at) DESC;
-    """)
+        """
+    )
 
 
 def _load_credential_owner_dids() -> dict[str, str]:
@@ -303,38 +308,39 @@ def _infer_contact_owner_dids(
     return [""], True
 
 
-def _migrate_existing_schema_to_v5(conn: sqlite3.Connection, version: int) -> None:
-    """Migrate an existing database to schema v5."""
+def _migrate_existing_schema_to_v6(conn: sqlite3.Connection, version: int) -> None:
+    """Migrate an existing database to schema v6."""
     logger.info("Migrating local schema from version=%d to version=%d", version, _SCHEMA_VERSION)
 
-    conn.executescript("""
+    conn.executescript(
+        """
         DROP VIEW IF EXISTS threads;
         DROP VIEW IF EXISTS inbox;
         DROP VIEW IF EXISTS outbox;
-    """)
+        """
+    )
 
     if _table_exists(conn, "messages"):
-        conn.execute("ALTER TABLE messages RENAME TO messages_v4")
+        conn.execute("ALTER TABLE messages RENAME TO messages_legacy")
     if _table_exists(conn, "e2ee_outbox"):
-        conn.execute("ALTER TABLE e2ee_outbox RENAME TO e2ee_outbox_v4")
+        conn.execute("ALTER TABLE e2ee_outbox RENAME TO e2ee_outbox_legacy")
     if _table_exists(conn, "contacts"):
-        conn.execute("ALTER TABLE contacts RENAME TO contacts_v4")
+        conn.execute("ALTER TABLE contacts RENAME TO contacts_legacy")
 
-    _create_schema_v5(conn)
-
+    _create_schema_v6(conn)
     credential_owner_dids = _load_credential_owner_dids()
 
-    if _table_exists(conn, "messages_v4"):
-        rows = conn.execute("SELECT * FROM messages_v4").fetchall()
+    if _table_exists(conn, "messages_legacy"):
+        rows = conn.execute("SELECT * FROM messages_legacy").fetchall()
         for row in rows:
             data = dict(row)
             owner_did = _infer_owner_did_from_message_row(data, credential_owner_dids)
             conn.execute(
                 """INSERT OR IGNORE INTO messages
                    (msg_id, owner_did, thread_id, direction, sender_did, receiver_did,
-                    group_id, group_did, content_type, content, server_seq, sent_at,
+                    group_id, group_did, content_type, content, title, server_seq, sent_at,
                     stored_at, is_e2ee, is_read, sender_name, metadata, credential_name)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     data.get("msg_id", ""),
                     owner_did,
@@ -346,6 +352,7 @@ def _migrate_existing_schema_to_v5(conn: sqlite3.Connection, version: int) -> No
                     data.get("group_did"),
                     data.get("content_type", "text"),
                     data.get("content", ""),
+                    data.get("title"),
                     data.get("server_seq"),
                     data.get("sent_at"),
                     data.get("stored_at") or datetime.now(timezone.utc).isoformat(),
@@ -356,17 +363,13 @@ def _migrate_existing_schema_to_v5(conn: sqlite3.Connection, version: int) -> No
                     _normalize_credential_name(data.get("credential_name")),
                 ),
             )
-        conn.execute("DROP TABLE messages_v4")
+        conn.execute("DROP TABLE messages_legacy")
 
-    if _table_exists(conn, "e2ee_outbox_v4"):
-        rows = conn.execute("SELECT * FROM e2ee_outbox_v4").fetchall()
+    if _table_exists(conn, "e2ee_outbox_legacy"):
+        rows = conn.execute("SELECT * FROM e2ee_outbox_legacy").fetchall()
         for row in rows:
             data = dict(row)
-            owner_did = _infer_owner_did_from_outbox_row(
-                data,
-                credential_owner_dids,
-                conn,
-            )
+            owner_did = _infer_owner_did_from_outbox_row(data, credential_owner_dids, conn)
             conn.execute(
                 """INSERT OR REPLACE INTO e2ee_outbox
                    (outbox_id, owner_did, peer_did, session_id, original_type, plaintext,
@@ -396,13 +399,11 @@ def _migrate_existing_schema_to_v5(conn: sqlite3.Connection, version: int) -> No
                     _normalize_credential_name(data.get("credential_name")),
                 ),
             )
-        conn.execute("DROP TABLE e2ee_outbox_v4")
+        conn.execute("DROP TABLE e2ee_outbox_legacy")
 
-    if _table_exists(conn, "contacts_v4"):
-        known_owner_dids = {
-            did for did in credential_owner_dids.values() if did
-        }
-        rows = conn.execute("SELECT * FROM contacts_v4").fetchall()
+    if _table_exists(conn, "contacts_legacy"):
+        known_owner_dids = {did for did in credential_owner_dids.values() if did}
+        rows = conn.execute("SELECT * FROM contacts_legacy").fetchall()
         for row in rows:
             data = dict(row)
             contact_did = str(data.get("did") or "")
@@ -440,7 +441,7 @@ def _migrate_existing_schema_to_v5(conn: sqlite3.Connection, version: int) -> No
                         metadata,
                     ),
                 )
-        conn.execute("DROP TABLE contacts_v4")
+        conn.execute("DROP TABLE contacts_legacy")
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
@@ -451,9 +452,9 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         return
 
     if version == 0:
-        _create_schema_v5(conn)
+        _create_schema_v6(conn)
     else:
-        _migrate_existing_schema_to_v5(conn, version)
+        _migrate_existing_schema_to_v6(conn, version)
 
     conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
     conn.commit()
@@ -495,6 +496,7 @@ def store_message(
     sender_name: str | None = None,
     metadata: str | None = None,
     credential_name: str | None = None,
+    title: str | None = None,
 ) -> None:
     """Store a single message. Duplicates are ignored per (msg_id, owner_did)."""
     now = datetime.now(timezone.utc).isoformat()
@@ -503,10 +505,10 @@ def store_message(
     conn.execute(
         """INSERT OR IGNORE INTO messages
            (msg_id, owner_did, thread_id, direction, sender_did, receiver_did,
-            group_id, group_did, content_type, content, server_seq,
+            group_id, group_did, content_type, content, title, server_seq,
             sent_at, stored_at, is_e2ee, is_read, sender_name, metadata,
             credential_name)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             msg_id,
             normalized_owner_did,
@@ -518,6 +520,7 @@ def store_message(
             group_did,
             content_type,
             content,
+            title,
             server_seq,
             sent_at,
             now,
@@ -563,6 +566,7 @@ def store_messages_batch(
             msg.get("group_did"),
             msg.get("content_type", "text"),
             msg.get("content", ""),
+            msg.get("title"),
             msg.get("server_seq"),
             msg.get("sent_at"),
             now,
@@ -576,10 +580,10 @@ def store_messages_batch(
     conn.executemany(
         """INSERT OR IGNORE INTO messages
            (msg_id, owner_did, thread_id, direction, sender_did, receiver_did,
-            group_id, group_did, content_type, content, server_seq,
+            group_id, group_did, content_type, content, title, server_seq,
             sent_at, stored_at, is_e2ee, is_read, sender_name, metadata,
             credential_name)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         rows,
     )
     conn.commit()
@@ -1005,10 +1009,10 @@ def rebind_owner_did(
         """
         INSERT OR IGNORE INTO messages
         (msg_id, owner_did, thread_id, direction, sender_did, receiver_did, group_id,
-         group_did, content_type, content, server_seq, sent_at, stored_at, is_e2ee,
+         group_did, content_type, content, title, server_seq, sent_at, stored_at, is_e2ee,
          is_read, sender_name, metadata, credential_name)
         SELECT msg_id, ?, thread_id, direction, sender_did, receiver_did, group_id,
-               group_did, content_type, content, server_seq, sent_at, stored_at, is_e2ee,
+               group_did, content_type, content, title, server_seq, sent_at, stored_at, is_e2ee,
                is_read, sender_name, metadata, credential_name
         FROM messages
         WHERE owner_did = ?

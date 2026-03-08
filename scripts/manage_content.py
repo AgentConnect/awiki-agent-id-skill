@@ -53,7 +53,7 @@ from utils.logging_config import configure_logging
 from credential_store import create_authenticator
 
 
-CONTENT_RPC = "/user-service/content/rpc"
+CONTENT_RPC = "/content/rpc"
 logger = logging.getLogger(__name__)
 
 
