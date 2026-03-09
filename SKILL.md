@@ -419,14 +419,14 @@ Private chat uses HPKE session initialization plus explicit session confirmation
 ### CLI Scripts (Manual / Initial Setup)
 
 ```bash
-# Initiate E2EE session
-cd <SKILL_DIR> && python scripts/e2ee_messaging.py --handshake "did:wba:awiki.ai:user:bob"
+# Send encrypted message directly (normal path; auto-init if needed)
+cd <SKILL_DIR> && python scripts/e2ee_messaging.py --send "did:wba:awiki.ai:user:bob" --content "Secret message"
 
 # Process E2EE messages in inbox manually (repair / recovery mode)
 cd <SKILL_DIR> && python scripts/e2ee_messaging.py --process --peer "did:wba:awiki.ai:user:bob"
 
-# Send encrypted message (auto-handshake if needed)
-cd <SKILL_DIR> && python scripts/e2ee_messaging.py --send "did:wba:awiki.ai:user:bob" --content "Secret message"
+# Optional advanced mode: pre-initialize E2EE session explicitly
+cd <SKILL_DIR> && python scripts/e2ee_messaging.py --handshake "did:wba:awiki.ai:user:bob"
 
 # List failed encrypted send attempts
 cd <SKILL_DIR> && python scripts/e2ee_messaging.py --list-failed
@@ -436,7 +436,7 @@ cd <SKILL_DIR> && python scripts/e2ee_messaging.py --retry <outbox_id>
 cd <SKILL_DIR> && python scripts/e2ee_messaging.py --drop <outbox_id>
 ```
 
-**Full workflow:** Alice `--handshake` → Bob auto-processes or `--process` → Bob sends `e2ee_ack` → Alice sees the session as remotely confirmed → both sides `--send` / `check_inbox.py` / `check_status.py` exchange and decode messages.
+**Full workflow:** Alice `--send` → sender auto-sends `e2ee_init` if needed → Bob auto-processes or `--process` → Bob sends `e2ee_ack` → Alice sees the session as remotely confirmed on the next `check_inbox.py` / `check_status.py` / `--process`.
 
 ### Immediate Plaintext Rendering
 
@@ -593,7 +593,7 @@ Agents can use `hint` to auto-attempt fixes or prompt the user.
 |---------|-------|----------|
 | DID resolve fails | `E2E_DID_DOMAIN` doesn't match DID domain | Verify environment variable matches |
 | JWT refresh fails | Private key doesn't match registration | Delete credentials in `~/.openclaw/credentials/...` and recreate |
-| E2EE session expired | Session exceeded 24-hour TTL | Re-run `--handshake` to create new session |
+| E2EE session expired | Session exceeded 24-hour TTL | Send again with `--send` (auto-reinitializes), or use `--handshake` for manual recovery |
 | Message send 403 | JWT expired | `setup_identity.py --load default` to refresh |
 | `ModuleNotFoundError: anp` | Dependency not installed | `pip install -r requirements.txt` |
 | Connection timeout | Service unreachable | Check `E2E_*_URL` and network |

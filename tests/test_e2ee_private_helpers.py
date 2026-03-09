@@ -132,6 +132,12 @@ class TestUserVisibleE2eePresentation:
         assert "encrypted message" in rendered.lower()
         assert rendered.endswith("secret")
 
+    def test_cli_renders_send_first_auto_init_notice(self):
+        rendered = e2ee_messaging._render_auto_session_notice("did:wba:example:user:bob")
+
+        assert "automatic init" in rendered.lower()
+        assert "did:wba:example:user:bob" in rendered
+
     def test_check_status_hides_protocol_only_message_types(self):
         assert check_status._is_user_visible_message_type("text") is True
         assert check_status._is_user_visible_message_type("e2ee_init") is False

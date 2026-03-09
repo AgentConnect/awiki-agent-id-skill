@@ -120,27 +120,25 @@ python3 scripts/manage_relationship.py --followers
 
 ### E2EE Encrypted Communication
 
-End-to-end encrypted messaging requires a handshake between both parties:
+End-to-end encrypted messaging now uses a send-first flow. `--send` automatically
+initializes or rekeys the E2EE session when needed, so manual `--handshake` is
+optional and mainly useful for debugging or pre-warming a session.
 
 ```bash
-# Step 1: Alice initiates handshake
-python3 scripts/e2ee_messaging.py --handshake "did:wba:awiki.ai:user:bob"
-
-# Step 2: Bob processes handshake request
-python3 scripts/e2ee_messaging.py --process --peer "did:wba:awiki.ai:user:alice"
-
-# Step 3: Alice processes handshake response
-python3 scripts/e2ee_messaging.py --process --peer "did:wba:awiki.ai:user:bob"
-
-# Step 4: Bob activates session
-python3 scripts/e2ee_messaging.py --process --peer "did:wba:awiki.ai:user:alice"
-
-# Now both can send and receive encrypted messages
+# Step 1: Alice sends an encrypted message directly.
+# If no active session exists, the CLI sends e2ee_init first and then the encrypted payload.
 python3 scripts/e2ee_messaging.py --send "did:wba:awiki.ai:user:bob" --content "Secret message"
+
+# Step 2: Bob processes the inbox (or relies on check_inbox/check_status/ws_listener auto-processing).
 python3 scripts/e2ee_messaging.py --process --peer "did:wba:awiki.ai:user:alice"
+
+# Optional advanced mode: pre-initialize a session explicitly.
+python3 scripts/e2ee_messaging.py --handshake "did:wba:awiki.ai:user:bob"
 ```
 
 E2EE session state is automatically persisted and can be reused across sessions.
+`check_inbox.py`, `check_status.py`, and the WebSocket listener can auto-process
+E2EE protocol messages, so manual `--process` is mainly for recovery or debugging.
 
 ### Groups
 

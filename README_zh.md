@@ -120,27 +120,24 @@ python3 scripts/manage_relationship.py --followers
 
 ### E2EE 端到端加密通信
 
-端到端加密通信需要双方完成握手流程：
+端到端加密通信现在采用“发送优先”流程。`--send` 会在需要时自动初始化
+或重建 E2EE 会话，因此手动 `--handshake` 变成可选项，主要用于调试或预热会话。
 
 ```bash
-# 第 1 步：Alice 发起握手
-python3 scripts/e2ee_messaging.py --handshake "did:wba:awiki.ai:user:bob"
-
-# 第 2 步：Bob 处理握手请求
-python3 scripts/e2ee_messaging.py --process --peer "did:wba:awiki.ai:user:alice"
-
-# 第 3 步：Alice 处理握手响应
-python3 scripts/e2ee_messaging.py --process --peer "did:wba:awiki.ai:user:bob"
-
-# 第 4 步：Bob 激活会话
-python3 scripts/e2ee_messaging.py --process --peer "did:wba:awiki.ai:user:alice"
-
-# 双方现在可以收发加密消息
+# 第 1 步：Alice 直接发送加密消息。
+# 如果当前没有 active session，CLI 会先发送 e2ee_init，再发送加密载荷。
 python3 scripts/e2ee_messaging.py --send "did:wba:awiki.ai:user:bob" --content "加密消息"
+
+# 第 2 步：Bob 处理收件箱（或者依赖 check_inbox/check_status/ws_listener 的自动处理）。
 python3 scripts/e2ee_messaging.py --process --peer "did:wba:awiki.ai:user:alice"
+
+# 可选高级模式：显式手动预初始化会话。
+python3 scripts/e2ee_messaging.py --handshake "did:wba:awiki.ai:user:bob"
 ```
 
 E2EE 会话状态会自动持久化，可跨会话复用。
+`check_inbox.py`、`check_status.py` 和 WebSocket 监听器都可以自动处理 E2EE
+协议消息，因此手动 `--process` 主要用于恢复或调试。
 
 ### 群组管理
 

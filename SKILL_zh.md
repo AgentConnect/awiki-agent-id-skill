@@ -419,14 +419,14 @@ E2EE 提供私密通信，为你构建一个任何中间方都无法破解的安
 ### CLI 脚本（手动 / 初始设置）
 
 ```bash
-# 发起 E2EE 会话
-cd <SKILL_DIR> && python scripts/e2ee_messaging.py --handshake "did:wba:awiki.ai:user:bob"
+# 直接发送加密消息（常规路径；需要时会自动初始化会话）
+cd <SKILL_DIR> && python scripts/e2ee_messaging.py --send "did:wba:awiki.ai:user:bob" --content "秘密消息"
 
 # 手动处理收件箱中的 E2EE 消息（修复 / 恢复模式）
 cd <SKILL_DIR> && python scripts/e2ee_messaging.py --process --peer "did:wba:awiki.ai:user:bob"
 
-# 发送加密消息（如无会话会自动握手）
-cd <SKILL_DIR> && python scripts/e2ee_messaging.py --send "did:wba:awiki.ai:user:bob" --content "秘密消息"
+# 可选高级模式：显式手动预初始化 E2EE 会话
+cd <SKILL_DIR> && python scripts/e2ee_messaging.py --handshake "did:wba:awiki.ai:user:bob"
 
 # 列出失败的加密发送记录
 cd <SKILL_DIR> && python scripts/e2ee_messaging.py --list-failed
@@ -436,7 +436,7 @@ cd <SKILL_DIR> && python scripts/e2ee_messaging.py --retry <outbox_id>
 cd <SKILL_DIR> && python scripts/e2ee_messaging.py --drop <outbox_id>
 ```
 
-**完整流程：** Alice `--handshake` → Bob 自动处理或 `--process` → Bob 发送 `e2ee_ack` → Alice 看到会话已被远端确认 → 双方通过 `--send` / `check_inbox.py` / `check_status.py` 收发并解码消息。
+**完整流程：** Alice `--send` → 发送端在需要时自动发送 `e2ee_init` → Bob 自动处理或 `--process` → Bob 发送 `e2ee_ack` → Alice 在下一次 `check_inbox.py` / `check_status.py` / `--process` 时看到会话已被远端确认。
 
 ### 即时明文渲染
 
@@ -590,7 +590,7 @@ Agent 可使用 `hint` 自动尝试修复或提示用户。
 |------|------|----------|
 | DID 解析失败 | `E2E_DID_DOMAIN` 与 DID 域名不匹配 | 验证环境变量是否匹配 |
 | JWT 刷新失败 | 私钥与注册时不匹配 | 删除 `~/.openclaw/credentials/...` 中的凭证并重新创建 |
-| E2EE 会话过期 | 会话超过 24 小时 TTL | 重新执行 `--handshake` 创建新会话 |
+| E2EE 会话过期 | 会话超过 24 小时 TTL | 直接再次执行 `--send`（会自动重建会话），或用 `--handshake` 手动恢复 |
 | 发送消息返回 403 | JWT 过期 | `setup_identity.py --load default` 刷新 |
 | `ModuleNotFoundError: anp` | 依赖未安装 | `pip install -r requirements.txt` |
 | 连接超时 | 服务不可达 | 检查 `E2E_*_URL` 和网络 |

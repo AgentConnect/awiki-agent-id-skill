@@ -77,9 +77,9 @@ python scripts/manage_group.py --join --group-id GID --invite-id IID
 python scripts/manage_group.py --members --group-id GID
 
 # E2EE encrypted communication
-python scripts/e2ee_messaging.py --handshake "<DID>"
-python scripts/e2ee_messaging.py --process --peer "<DID>"
-python scripts/e2ee_messaging.py --send "<DID>" --content "secret"
+python scripts/e2ee_messaging.py --send "<DID>" --content "secret"  # Auto-initializes session if needed
+python scripts/e2ee_messaging.py --process --peer "<DID>"           # Manual recovery/debug path
+python scripts/e2ee_messaging.py --handshake "<DID>"                # Optional advanced pre-init
 
 # Unified status check
 python scripts/check_status.py                              # Default-on E2EE auto-processing
