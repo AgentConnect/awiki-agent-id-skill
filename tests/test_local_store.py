@@ -904,6 +904,122 @@ class TestMigration:
         assert migrated_outbox["owner_did"] == "did:alice"
         assert migrated_new_tables == {"groups", "group_members", "relationship_events"}
 
+    def test_migrate_real_v6_schema_to_v9_without_manual_contact_column_patch(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A historical v6 database should upgrade even when contacts lacks v8 fields."""
+        monkeypatch.setenv("AWIKI_DATA_DIR", str(tmp_path))
+        db_dir = tmp_path / "database"
+        db_dir.mkdir(parents=True, exist_ok=True)
+        db_path = db_dir / "awiki.db"
+
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        conn.executescript("""
+            CREATE TABLE contacts (
+                owner_did TEXT NOT NULL DEFAULT '',
+                did TEXT NOT NULL,
+                name TEXT,
+                handle TEXT,
+                nick_name TEXT,
+                bio TEXT,
+                profile_md TEXT,
+                tags TEXT,
+                relationship TEXT,
+                first_seen_at TEXT,
+                last_seen_at TEXT,
+                metadata TEXT,
+                PRIMARY KEY (owner_did, did)
+            );
+            CREATE TABLE messages (
+                msg_id TEXT NOT NULL,
+                owner_did TEXT NOT NULL DEFAULT '',
+                thread_id TEXT NOT NULL,
+                direction INTEGER NOT NULL DEFAULT 0,
+                sender_did TEXT,
+                receiver_did TEXT,
+                group_id TEXT,
+                group_did TEXT,
+                content_type TEXT DEFAULT 'text',
+                content TEXT,
+                title TEXT,
+                server_seq INTEGER,
+                sent_at TEXT,
+                stored_at TEXT NOT NULL,
+                is_e2ee INTEGER DEFAULT 0,
+                is_read INTEGER DEFAULT 0,
+                sender_name TEXT,
+                metadata TEXT,
+                credential_name TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (msg_id, owner_did)
+            );
+            CREATE TABLE e2ee_outbox (
+                outbox_id TEXT PRIMARY KEY,
+                owner_did TEXT NOT NULL DEFAULT '',
+                peer_did TEXT NOT NULL,
+                session_id TEXT,
+                original_type TEXT NOT NULL DEFAULT 'text',
+                plaintext TEXT NOT NULL,
+                local_status TEXT NOT NULL DEFAULT 'queued',
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                sent_msg_id TEXT,
+                sent_server_seq INTEGER,
+                last_error_code TEXT,
+                retry_hint TEXT,
+                failed_msg_id TEXT,
+                failed_server_seq INTEGER,
+                metadata TEXT,
+                last_attempt_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                credential_name TEXT NOT NULL DEFAULT ''
+            );
+            PRAGMA user_version = 6;
+        """)
+        conn.execute(
+            """
+            INSERT INTO contacts
+            (owner_did, did, name, relationship, first_seen_at, last_seen_at)
+            VALUES
+            ('did:owner', 'did:peer', 'Peer', 'following',
+             '2026-03-10T00:00:00+00:00', '2026-03-10T00:00:00+00:00')
+            """
+        )
+        conn.commit()
+
+        local_store.ensure_schema(conn)
+
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        contact_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(contacts)").fetchall()
+        }
+        indexes = _schema_object_names(conn, "index")
+        migrated_contact = conn.execute(
+            """
+            SELECT owner_did, did, source_group_id, recommended_reason, followed, messaged, note
+            FROM contacts
+            WHERE owner_did = 'did:owner' AND did = 'did:peer'
+            """
+        ).fetchone()
+        conn.close()
+
+        assert version == local_store._SCHEMA_VERSION
+        assert "source_group_id" in contact_columns
+        assert "recommended_reason" in contact_columns
+        assert "followed" in contact_columns
+        assert "messaged" in contact_columns
+        assert "note" in contact_columns
+        assert "idx_contacts_owner_source_group" in indexes
+        assert migrated_contact["owner_did"] == "did:owner"
+        assert migrated_contact["did"] == "did:peer"
+        assert migrated_contact["source_group_id"] is None
+        assert migrated_contact["recommended_reason"] is None
+        assert migrated_contact["followed"] == 0
+        assert migrated_contact["messaged"] == 0
+        assert migrated_contact["note"] is None
+
     def test_rebind_owner_did_moves_messages_without_duplicate_conflicts(self, db):
         local_store.store_message(
             db,

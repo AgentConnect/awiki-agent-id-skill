@@ -179,10 +179,6 @@ _V6_INDEX_STATEMENTS = {
         CREATE INDEX IF NOT EXISTS idx_contacts_owner
             ON contacts(owner_did, last_seen_at DESC)
     """,
-    "idx_contacts_owner_source_group": """
-        CREATE INDEX IF NOT EXISTS idx_contacts_owner_source_group
-            ON contacts(owner_did, source_group_id)
-    """,
     "idx_messages_owner_thread": """
         CREATE INDEX IF NOT EXISTS idx_messages_owner_thread
             ON messages(owner_did, thread_id, sent_at)
@@ -249,6 +245,10 @@ _V7_EXTRA_INDEX_STATEMENTS = {
 }
 
 _V8_EXTRA_INDEX_STATEMENTS = {
+    "idx_contacts_owner_source_group": """
+        CREATE INDEX IF NOT EXISTS idx_contacts_owner_source_group
+            ON contacts(owner_did, source_group_id)
+    """,
     "idx_relationship_events_owner_target_time": """
         CREATE INDEX IF NOT EXISTS idx_relationship_events_owner_target_time
             ON relationship_events(owner_did, target_did, created_at DESC)
