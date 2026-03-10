@@ -4,8 +4,8 @@ Usage:
     # Create a discovery group
     uv run python scripts/manage_group.py --create --name "OpenClaw Meetup" --slug "openclaw-meetup"
 
-    # Join with the global 6-digit join code
-    uv run python scripts/manage_group.py --join --passcode 314159
+    # Join with the global 6-digit join-code
+    uv run python scripts/manage_group.py --join --join-code 314159
 
     # View members
     uv run python scripts/manage_group.py --members --group-id GROUP_ID
@@ -45,7 +45,8 @@ from credential_store import create_authenticator
 GROUP_RPC_ENDPOINT = "/group/rpc"
 logger = logging.getLogger(__name__)
 _JOIN_GUIDANCE = (
-    "Discovery groups now use a global 6-digit join code. Use --join --passcode <code>."
+    "Discovery groups can only be joined with the global 6-digit join-code. "
+    "Use --join --join-code <code>."
 )
 
 
@@ -420,11 +421,11 @@ async def refresh_join_code(
     group_id: str,
     credential_name: str,
 ) -> None:
-    """Refresh the active join code."""
+    """Refresh the active join-code."""
     config = SDKConfig()
     identity_data = _get_identity_data_or_exit(credential_name, config)
     logger.info(
-        "Refreshing discovery group join code credential=%s group_id=%s",
+        "Refreshing discovery group join-code credential=%s group_id=%s",
         credential_name,
         group_id,
     )
@@ -440,7 +441,7 @@ async def refresh_join_code(
         my_role="owner",
         membership_status="active",
     )
-    print("Join code refreshed successfully:")
+    print("Join-code refreshed successfully:")
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
@@ -449,11 +450,11 @@ async def get_join_code(
     group_id: str,
     credential_name: str,
 ) -> None:
-    """Get the active join code."""
+    """Get the active join-code."""
     config = SDKConfig()
     identity_data = _get_identity_data_or_exit(credential_name, config)
     logger.info(
-        "Fetching discovery group join code credential=%s group_id=%s",
+        "Fetching discovery group join-code credential=%s group_id=%s",
         credential_name,
         group_id,
     )
@@ -469,7 +470,7 @@ async def get_join_code(
         my_role="owner",
         membership_status="active",
     )
-    print("Current join code:")
+    print("Current join-code:")
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
@@ -506,17 +507,17 @@ async def set_join_enabled(
 
 async def join_group(
     *,
-    passcode: str,
+    join_code: str,
     credential_name: str,
 ) -> None:
-    """Join a group with the global 6-digit join code."""
+    """Join a group with the only supported global 6-digit join-code."""
     config = SDKConfig()
     identity_data = _get_identity_data_or_exit(credential_name, config)
     logger.info("Joining discovery group credential=%s", credential_name)
     result = await _authenticated_group_call(
         credential_name,
         "join",
-        {"passcode": passcode},
+        {"passcode": join_code},
     )
     detail = await _authenticated_group_call(
         credential_name,
@@ -746,15 +747,19 @@ def _build_parser() -> argparse.ArgumentParser:
     action.add_argument("--get", action="store_true", help="View group detail")
     action.add_argument("--update", action="store_true", help="Update group metadata")
     action.add_argument(
-        "--refresh-join-code", action="store_true", help="Refresh the current join code"
+        "--refresh-join-code", action="store_true", help="Refresh the current join-code"
     )
     action.add_argument(
-        "--get-join-code", action="store_true", help="View the current join code"
+        "--get-join-code", action="store_true", help="View the current join-code"
     )
     action.add_argument(
         "--set-join-enabled", action="store_true", help="Enable or disable joining"
     )
-    action.add_argument("--join", action="store_true", help="Join with a 6-digit code")
+    action.add_argument(
+        "--join",
+        action="store_true",
+        help="Join with the only supported 6-digit join-code",
+    )
     action.add_argument("--leave", action="store_true", help="Leave a group")
     action.add_argument(
         "--kick-member", action="store_true", help="Remove a member from a group"
@@ -783,7 +788,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "--join-enabled", type=_parse_bool, default=None, help="true or false"
     )
     parser.add_argument("--group-id", type=str, help="Group ID")
-    parser.add_argument("--passcode", type=str, help="6-digit group join code")
+    parser.add_argument(
+        "--join-code",
+        type=str,
+        help="6-digit group join-code; this is the only supported way to join",
+    )
+    parser.add_argument(
+        "--passcode",
+        dest="join_code",
+        type=str,
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--target-did", type=str, help="Target DID")
     parser.add_argument("--target-user-id", type=str, help="Target user ID")
     parser.add_argument("--content", type=str, help="Message content")
@@ -832,9 +847,9 @@ def main() -> None:
 
     try:
         if args.create:
-            if args.passcode:
+            if args.join_code:
                 parser.error(
-                    "Creating a group does not accept --passcode; the server generates the initial code"
+                    "Creating a group does not accept --join-code; the server generates the initial join-code"
                 )
             if not all(
                 [
@@ -895,7 +910,7 @@ def main() -> None:
             )
         elif args.refresh_join_code:
             if not args.group_id:
-                parser.error("Refreshing the join code requires --group-id")
+                parser.error("Refreshing the join-code requires --group-id")
             asyncio.run(
                 refresh_join_code(
                     group_id=args.group_id, credential_name=args.credential
@@ -903,7 +918,7 @@ def main() -> None:
             )
         elif args.get_join_code:
             if not args.group_id:
-                parser.error("Viewing the join code requires --group-id")
+                parser.error("Viewing the join-code requires --group-id")
             asyncio.run(
                 get_join_code(group_id=args.group_id, credential_name=args.credential)
             )
@@ -924,10 +939,10 @@ def main() -> None:
         elif args.join:
             if args.group_id or args.doc_url:
                 parser.error(_JOIN_GUIDANCE)
-            if not args.passcode:
-                parser.error("Joining a group requires --passcode")
+            if not args.join_code:
+                parser.error("Joining a group requires --join-code")
             asyncio.run(
-                join_group(passcode=args.passcode, credential_name=args.credential)
+                join_group(join_code=args.join_code, credential_name=args.credential)
             )
         elif args.leave:
             if not args.group_id:

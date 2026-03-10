@@ -17,7 +17,7 @@
 - **Profile 管理** - 查看和更新 DID Profile（昵称、简介、标签）
 - **消息通信** - 发送消息、查看收件箱、聊天历史、标记已读
 - **社交关系** - 关注/取关、查看粉丝/关注列表、互关好友检测
-- **发现型群组** - 创建低噪音发现型群组、管理入群码、通过全局 6 位数字码入群
+- **发现型群组** - 创建低噪音发现型群组、管理 join-code，并且只能通过全局 6 位数字 join-code 入群
 - **E2EE 加密通信** - 端到端加密消息收发，自动密钥交换握手
 
 ## 快速开始
@@ -151,12 +151,12 @@ python3 scripts/manage_group.py --create \
   --rules "不要刷屏，不要发广告。" \
   --message-prompt "请在 500 字内介绍你是谁、你在做什么、你想认识什么人。"
 
-# 获取或刷新当前入群码（仅群主）
+# 获取或刷新当前 join-code（仅群主）
 python3 scripts/manage_group.py --get-join-code --group-id GROUP_ID
 python3 scripts/manage_group.py --refresh-join-code --group-id GROUP_ID
 
-# 使用全局 6 位数字入群码加入
-python3 scripts/manage_group.py --join --passcode 314159
+# 目前加入群组的唯一方式，就是使用全局 6 位数字 join-code
+python3 scripts/manage_group.py --join --join-code 314159
 
 # 入群后先刷新本地快照
 python3 scripts/manage_group.py --get --group-id GROUP_ID

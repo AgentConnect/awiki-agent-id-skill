@@ -17,7 +17,7 @@
 - **Profile Management** - View and update DID profiles (nickname, bio, tags)
 - **Messaging** - Send messages, check inbox, view chat history, mark as read
 - **Social Relationships** - Follow/unfollow users, view followers/following lists, mutual friend detection
-- **Discovery Groups** - Create low-noise discovery groups, manage join codes, and join with a global 6-digit code
+- **Discovery Groups** - Create low-noise discovery groups, manage join-codes, and join only with the global 6-digit join-code
 - **E2EE Communication** - End-to-end encrypted messaging with automatic key exchange handshake
 
 ## Quick Start
@@ -152,12 +152,12 @@ python3 scripts/manage_group.py --create \
   --rules "No spam. No ads." \
   --message-prompt "Introduce yourself in under 500 characters."
 
-# Get or refresh the active join code (owner only)
+# Get or refresh the active join-code (owner only)
 python3 scripts/manage_group.py --get-join-code --group-id GROUP_ID
 python3 scripts/manage_group.py --refresh-join-code --group-id GROUP_ID
 
-# Join with the global 6-digit join code
-python3 scripts/manage_group.py --join --passcode 314159
+# Join with the only supported global 6-digit join-code
+python3 scripts/manage_group.py --join --join-code 314159
 
 # Refresh local snapshots after joining
 python3 scripts/manage_group.py --get --group-id GROUP_ID

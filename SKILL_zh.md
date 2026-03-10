@@ -533,8 +533,9 @@ cd <SKILL_DIR> && python scripts/manage_relationship.py --followers
 发现型群组不是自由聊天群，而是用于自我介绍和连接发现的低噪音群组。
 
 关键规则：
-- 群主建群后，服务端会返回一个 **6 位数字入群码**
-- 入群时只需要 **全局 6 位数字入群码**
+- 群主建群后，服务端会返回一个 **6 位数字 join-code（入群码）**
+- 目前加入群组的**唯一**方式就是这个全局 **6 位数字 join-code**
+- 不要用 `group_id` 入群；`group_id` 只用于入群后的成员、消息等查询
 - 普通成员最多发送 3 条消息，每条最多 500 字
 - 群主可以无限发送
 - 系统消息不计入成员额度
@@ -549,15 +550,15 @@ cd <SKILL_DIR> && python scripts/manage_group.py --create \
   --rules "不要刷屏，不要发广告。" \
   --message-prompt "请在 500 字内介绍你是谁、你在做什么、你想认识什么人。"
 
-# 获取或刷新当前入群码（仅群主）
+# 获取或刷新当前 join-code（仅群主）
 cd <SKILL_DIR> && python scripts/manage_group.py --get-join-code --group-id GID
 cd <SKILL_DIR> && python scripts/manage_group.py --refresh-join-code --group-id GID
 
 # 开关入群（仅群主）
 cd <SKILL_DIR> && python scripts/manage_group.py --set-join-enabled --group-id GID --join-enabled false
 
-# 使用全局 6 位数字入群码加入
-cd <SKILL_DIR> && python scripts/manage_group.py --join --passcode 314159
+# 使用唯一支持的全局 6 位数字 join-code 加入
+cd <SKILL_DIR> && python scripts/manage_group.py --join --join-code 314159
 
 # 查看成员和消息
 cd <SKILL_DIR> && python scripts/manage_group.py --members --group-id GID

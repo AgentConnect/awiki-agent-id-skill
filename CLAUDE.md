@@ -73,7 +73,7 @@ python scripts/manage_content.py --delete --slug jd
 # Group management
 python scripts/manage_group.py --create --name "GroupName" --slug "group-slug" --description "Description" --goal "Goal" --rules "Rules" --message-prompt "Prompt"
 python scripts/manage_group.py --get-join-code --group-id GID
-python scripts/manage_group.py --join --passcode 314159
+python scripts/manage_group.py --join --join-code 314159
 python scripts/manage_group.py --members --group-id GID
 
 # E2EE encrypted communication

@@ -46,7 +46,7 @@ class TestManageGroupCli:
                 "--join",
                 "--group-id",
                 "grp_1",
-                "--passcode",
+                "--join-code",
                 "314159",
             ],
         )
@@ -54,7 +54,10 @@ class TestManageGroupCli:
         with pytest.raises(SystemExit):
             manage_group_cli.main()
 
-        assert "global 6-digit join code" in capsys.readouterr().err
+        assert (
+            "can only be joined with the global 6-digit join-code"
+            in capsys.readouterr().err
+        )
 
     def test_create_dispatches_with_group_name_alias(
         self,
@@ -103,7 +106,37 @@ class TestManageGroupCli:
             "credential_name": "default",
         }
 
-    def test_join_dispatches_with_passcode_only(
+    def test_join_dispatches_with_join_code_only(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        async def _fake_join_group(**kwargs):
+            captured.update(kwargs)
+
+        monkeypatch.setattr(
+            manage_group_cli, "configure_logging", lambda **kwargs: None
+        )
+        monkeypatch.setattr(manage_group_cli, "join_group", _fake_join_group)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "manage_group.py",
+                "--join",
+                "--join-code",
+                "314159",
+                "--credential",
+                "bob",
+            ],
+        )
+
+        manage_group_cli.main()
+
+        assert captured == {"join_code": "314159", "credential_name": "bob"}
+
+    def test_join_accepts_legacy_passcode_alias(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -131,7 +164,7 @@ class TestManageGroupCli:
 
         manage_group_cli.main()
 
-        assert captured == {"passcode": "314159", "credential_name": "bob"}
+        assert captured == {"join_code": "314159", "credential_name": "bob"}
 
     def test_jsonrpc_error_is_rendered_as_json(
         self,
