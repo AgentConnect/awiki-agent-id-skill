@@ -40,6 +40,10 @@ python scripts/get_profile.py --handle alice                  # View another use
 python scripts/get_profile.py --resolve "<DID>"               # Resolve DID document
 python scripts/update_profile.py --nick-name "Name" --bio "Bio" --tags "tag1,tag2"
 
+# User search (用户搜索)
+python scripts/search_users.py "alice"                     # Search users
+python scripts/search_users.py "AI agent" --credential bob # Search with specific credential
+
 # Handle (short name) registration and resolution
 python scripts/register_handle.py --handle alice --phone +8613800138000
 python scripts/register_handle.py --handle bob --phone +8613800138000 --invite-code ABC123
@@ -123,6 +127,7 @@ Three-layer architecture: CLI script layer -> Persistence layer -> Core utility 
 - **credential_store.py** / **e2ee_store.py**: Credential and E2EE state persistence to `~/.openclaw/credentials/awiki-agent-id-message/` directory (JSON format, 600 permissions)
 - **local_store.py**: SQLite local storage — contacts + messages + `e2ee_outbox` three tables, threads/inbox/outbox views. Single shared database at `<DATA_DIR>/database/awiki.db`. Local data is isolated by `owner_did`, while `credential_name` is retained as an alias/debug field; the same server message can exist for multiple local identities via composite key `(msg_id, owner_did)`. Messages also support an optional plaintext `title` field. `e2ee_outbox` tracks encrypted send attempts, peer-side failures, and resend/drop decisions. WAL mode for concurrent read/write. Sync API (sqlite3 stdlib), ws_listener wraps via `asyncio.to_thread()`. Schema versioned via `PRAGMA user_version` (current: v6)
 - **query_db.py**: Read-only SQL query CLI — accepts a SELECT statement, executes against local SQLite, returns JSON. Rejects write operations and multi-statement queries
+- **search_users.py**: User search (用户搜索) — search users by semantic matching via `/user-service/users/rpc` search method
 - **check_status.py**: Unified status check entry point — chains identity verification, inbox classification summary, and server_seq-aware E2EE auto-processing. Outputs structured JSON. Called by Agent session startup protocol and heartbeat
 - **listener_config.py**: `ListenerConfig` + `RoutingRules` — WebSocket listener configuration module. Defines dual webhook endpoints, routing modes (agent-all/smart/wake-all), message routing rules and E2EE transparent processing parameters. Supports unified settings.json (`listener` sub-object, at `<DATA_DIR>/config/settings.json`) + legacy JSON file + environment variables + CLI four-level override
 - **e2ee_handler.py**: `E2eeHandler` — E2EE transparent handler for WebSocket listener. Intercepts E2EE messages before `classify_message`: protocol messages (init/rekey/error) are handled internally without forwarding, encrypted messages (e2ee_msg) are decrypted and forwarded as plaintext. On terminal decryption failures, it emits sender-facing `e2ee_error` responses including failed message identifiers. asyncio.Lock protects concurrency, periodic state saving
