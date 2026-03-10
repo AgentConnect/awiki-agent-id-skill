@@ -42,8 +42,8 @@ def _index_names(conn: sqlite3.Connection) -> set[str]:
 
 
 @pytest.fixture()
-def prepared_v6_database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Create a v6 database with selected indexes removed."""
+def prepared_ready_database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Create a ready database with selected indexes removed."""
     monkeypatch.setenv("AWIKI_DATA_DIR", str(tmp_path))
 
     conn = local_store.get_connection()
@@ -57,15 +57,15 @@ def prepared_v6_database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Pat
 
 
 def test_ensure_local_database_ready_repairs_ready_database(
-    prepared_v6_database: Path,
+    prepared_ready_database: Path,
 ) -> None:
     """Ready-state checks should repair missing indexes before returning."""
     result = database_migration.ensure_local_database_ready()
 
     assert result["status"] == "ready"
-    assert result["db_path"] == str(prepared_v6_database)
-    assert result["before_version"] == 6
-    assert result["after_version"] == 6
+    assert result["db_path"] == str(prepared_ready_database)
+    assert result["before_version"] == local_store._SCHEMA_VERSION
+    assert result["after_version"] == local_store._SCHEMA_VERSION
 
     conn = local_store.get_connection()
     try:
@@ -75,15 +75,15 @@ def test_ensure_local_database_ready_repairs_ready_database(
 
 
 def test_migrate_local_database_repairs_ready_database_without_backup(
-    prepared_v6_database: Path,
+    prepared_ready_database: Path,
 ) -> None:
     """The standalone migration helper should self-heal ready databases."""
     result = database_migration.migrate_local_database()
 
     assert result["status"] == "ready"
-    assert result["db_path"] == str(prepared_v6_database)
-    assert result["before_version"] == 6
-    assert result["after_version"] == 6
+    assert result["db_path"] == str(prepared_ready_database)
+    assert result["before_version"] == local_store._SCHEMA_VERSION
+    assert result["after_version"] == local_store._SCHEMA_VERSION
     assert result["backup_path"] is None
 
     conn = local_store.get_connection()

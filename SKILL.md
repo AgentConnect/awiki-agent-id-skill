@@ -79,6 +79,8 @@ After installation, run this once:
 cd <SKILL_DIR> && python scripts/check_status.py
 ```
 This checks the credential storage layout and automatically migrates legacy flat-file credentials when needed.
+It also self-heals the local SQLite schema when an older skill version left the
+database behind.
 
 **Option 2: Git clone (if zip download fails)**
 ```bash
@@ -91,6 +93,8 @@ After installation, run this once:
 cd <SKILL_DIR> && python scripts/check_status.py
 ```
 This checks the credential storage layout and automatically migrates legacy flat-file credentials when needed.
+It also self-heals the local SQLite schema when an older skill version left the
+database behind.
 
 ## Upgrading
 

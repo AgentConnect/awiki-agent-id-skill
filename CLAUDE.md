@@ -85,6 +85,7 @@ python scripts/e2ee_messaging.py --handshake "<DID>"                # Optional a
 python scripts/check_status.py                              # Default-on E2EE auto-processing
 python scripts/check_status.py --no-auto-e2ee               # Disable E2EE auto-processing
 python scripts/check_status.py --credential alice           # Specify credential
+python scripts/check_status.py --upgrade-only               # Run local upgrade / migration checks only
 
 # WebSocket listener (background service management)
 python scripts/ws_listener.py install --credential default --mode smart  # Install and start

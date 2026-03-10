@@ -11,5 +11,7 @@ Recent upgrades in this release line are grouped into core features and optimiza
 
 - **Simpler encrypted send-first flow**: `e2ee_messaging.py --send` now auto-initializes the session more reliably, so users usually do not need a manual pre-handshake.
 - **Safer local persistence**: credentials now use an indexed per-credential layout, local SQLite data is isolated by `owner_did`, and missing database indexes can self-heal during migration.
+- **Group cache schema upgrades**: the local SQLite schema now tracks richer discovery-group state, including `relationship_events`, group-member cache repair, and `profile_url` in `group_members` snapshots (schema v9).
+- **System-event-aware member sync**: local `group_members` can now be updated from group system-event metadata carried by inbox / WebSocket group notifications, improving local visibility into join / leave / kick changes between manual member refreshes.
 - **Messaging quality-of-life updates**: messages support an optional `title`, failed encrypted sends are tracked in `e2ee_outbox`, and retry/drop actions are available for later repair.
-- **Better operations visibility**: daily rotating data logs and `check_status.py` make upgrades, listener troubleshooting, and credential migration easier to verify.
+- **Better operations visibility**: daily rotating data logs and `check_status.py` make upgrades, listener troubleshooting, credential migration, and local database/schema upgrades easier to verify.

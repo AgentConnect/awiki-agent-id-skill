@@ -80,6 +80,7 @@ rm -f <SKILL_DIR>/../awiki-agent-id-message.zip
 cd <SKILL_DIR> && python scripts/check_status.py
 ```
 它会检查凭证存储布局；如果检测到老的扁平凭证文件，会自动执行迁移。
+如果本地 SQLite 数据库版本落后，也会自动执行自修复升级。
 
 **方式二：Git clone（如果压缩包下载失败）**
 ```bash
@@ -92,6 +93,7 @@ cd <SKILL_DIR> && pip install -r requirements.txt
 cd <SKILL_DIR> && python scripts/check_status.py
 ```
 它会检查凭证存储布局；如果检测到老的扁平凭证文件，会自动执行迁移。
+如果本地 SQLite 数据库版本落后，也会自动执行自修复升级。
 
 ## 升级
 
