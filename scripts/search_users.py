@@ -10,7 +10,7 @@ Usage:
 [INPUT]: SDK (RPC calls), credential_store (load identity credentials),
          logging_config
 [OUTPUT]: Search results as JSON output
-[POS]: User search script
+[POS]: User search script — calls search-service /search/rpc
 
 [PROTOCOL]:
 1. Update this header when logic changes
@@ -28,7 +28,7 @@ from utils.logging_config import configure_logging
 from credential_store import create_authenticator
 
 
-USERS_RPC = "/user-service/users/rpc"
+SEARCH_RPC = "/search/rpc"
 logger = logging.getLogger(__name__)
 
 
@@ -44,7 +44,7 @@ async def search_users(query: str, credential_name: str = "default") -> None:
     auth, _ = auth_result
     async with create_user_service_client(config) as client:
         result = await authenticated_rpc_call(
-            client, USERS_RPC, "search",
+            client, SEARCH_RPC, "search",
             params={"type": "keyword", "q": query},
             auth=auth, credential_name=credential_name,
         )

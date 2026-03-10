@@ -52,7 +52,7 @@ class TestSearchUsersParams:
         ):
             await search_users.search_users("alice", "default")
 
-        assert captured_params["endpoint"] == "/user-service/users/rpc"
+        assert captured_params["endpoint"] == "/search/rpc"
         assert captured_params["method"] == "search"
         assert captured_params["params"] == {"type": "keyword", "q": "alice"}
 
