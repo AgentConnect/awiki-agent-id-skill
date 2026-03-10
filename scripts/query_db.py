@@ -3,6 +3,9 @@
 Usage:
     python scripts/query_db.py "SELECT * FROM threads LIMIT 10"
     python scripts/query_db.py "SELECT * FROM messages WHERE credential_name='alice' LIMIT 10"
+    python scripts/query_db.py "SELECT * FROM groups ORDER BY last_message_at DESC LIMIT 10"
+    python scripts/query_db.py "SELECT * FROM group_members WHERE group_id='grp_xxx' LIMIT 20"
+    python scripts/query_db.py "SELECT * FROM relationship_events WHERE status='pending' ORDER BY created_at DESC LIMIT 20"
 
 [INPUT]: local_store (SQLite connection + execute_sql), logging_config
 [OUTPUT]: JSON query results to stdout

@@ -16,7 +16,8 @@ Usage:
 [INPUT]: SDK (RPC calls), credential_store (load identity credentials), local_store,
          E2EE runtime helpers, outbox tracking, logging_config
 [OUTPUT]: Inbox message list / chat history / mark-read result, with immediate
-          private E2EE protocol processing and plaintext decryption when possible
+          private E2EE protocol processing, plaintext decryption when possible,
+          and best-effort local group snapshot persistence for group messages
 [POS]: Message receiving and processing script
 
 [PROTOCOL]:
@@ -430,6 +431,31 @@ def _store_inbox_messages(
             owner_did=my_did,
             credential_name=credential_name,
         )
+        group_snapshots: dict[str, Any] = {}
+        for msg in messages:
+            group_id = str(msg.get("group_id") or "")
+            if not group_id:
+                continue
+            current = group_snapshots.get(group_id)
+            current_seq = current.get("server_seq") if isinstance(current, dict) else None
+            next_seq = msg.get("server_seq")
+            if current is not None and isinstance(current_seq, int) and isinstance(next_seq, int):
+                if next_seq <= current_seq:
+                    continue
+            group_snapshots[group_id] = msg
+
+        for group_id, msg in group_snapshots.items():
+            local_store.upsert_group(
+                conn,
+                owner_did=my_did,
+                group_id=str(group_id),
+                group_did=msg.get("group_did"),
+                name=msg.get("group_name"),
+                membership_status="active",
+                last_synced_seq=msg.get("server_seq"),
+                last_message_at=msg.get("sent_at") or msg.get("created_at"),
+                credential_name=credential_name,
+            )
         # Record senders in contacts
         seen_dids: set[str] = set()
         for msg in messages:

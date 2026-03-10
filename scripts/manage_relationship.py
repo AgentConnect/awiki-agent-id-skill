@@ -17,8 +17,8 @@ Usage:
     uv run python scripts/manage_relationship.py --followers
 
 [INPUT]: SDK (RPC calls), credential_store (load identity credentials),
-         logging_config
-[OUTPUT]: Relationship operation results
+         local_store, logging_config
+[OUTPUT]: Relationship operation results with local contact sedimentation updates
 [POS]: Social relationship management script
 
 [PROTOCOL]:
@@ -31,7 +31,6 @@ import asyncio
 import json
 import logging
 import sys
-from pathlib import Path
 
 from utils import SDKConfig, create_user_service_client, authenticated_rpc_call, resolve_to_did
 from utils.logging_config import configure_logging
@@ -66,6 +65,15 @@ async def follow(target_did: str, credential_name: str = "default") -> None:
                 owner_did=data["did"],
                 did=target_did,
                 relationship="following",
+                followed=True,
+            )
+            local_store.append_relationship_event(
+                conn,
+                owner_did=data["did"],
+                target_did=target_did,
+                event_type="followed",
+                status="applied",
+                credential_name=credential_name,
             )
             conn.close()
         except Exception:
@@ -97,6 +105,15 @@ async def unfollow(target_did: str, credential_name: str = "default") -> None:
                 owner_did=data["did"],
                 did=target_did,
                 relationship="none",
+                followed=False,
+            )
+            local_store.append_relationship_event(
+                conn,
+                owner_did=data["did"],
+                target_did=target_did,
+                event_type="unfollowed",
+                status="applied",
+                credential_name=credential_name,
             )
             conn.close()
         except Exception:

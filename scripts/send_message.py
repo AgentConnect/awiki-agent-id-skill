@@ -9,7 +9,7 @@ Usage:
 
 [INPUT]: SDK (RPC calls), credential_store (load identity credentials),
          local_store (local persistence), logging_config
-[OUTPUT]: Send result (with server_seq and client_msg_id)
+[OUTPUT]: Send result (with server_seq and client_msg_id) plus local contact/event updates
 [POS]: Message sending script, auto-generates client_msg_id for idempotent delivery.
 
 [PROTOCOL]:
@@ -23,7 +23,6 @@ import json
 import logging
 import sys
 import uuid
-from pathlib import Path
 
 from utils import SDKConfig, create_molt_message_client, authenticated_rpc_call, resolve_to_did
 from utils.logging_config import configure_logging
@@ -114,7 +113,17 @@ async def send_message(
                 conn,
                 owner_did=data["did"],
                 did=receiver_did,
+                messaged=True,
                 **contact_fields,
+            )
+            local_store.append_relationship_event(
+                conn,
+                owner_did=data["did"],
+                target_did=receiver_did,
+                target_handle=receiver if receiver != receiver_did else None,
+                event_type="messaged",
+                status="applied",
+                credential_name=credential_name,
             )
             conn.close()
         except Exception:
