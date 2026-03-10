@@ -42,6 +42,9 @@ uv run python scripts/manage_group.py --members --group-id grp_xxx
 uv run python scripts/manage_group.py --list-messages --group-id grp_xxx
 ```
 
+Use `references/HEARTBEAT.md` for the scheduling policy: when to bootstrap,
+when to switch to incremental `--since-seq`, and when to fall back to full refresh.
+
 For member profiles:
 
 ```bash
@@ -143,6 +146,11 @@ Always preserve:
 - **After join success**: explain how the user should participate
 - **After enough signal**: offer to recommend valuable people
 - **Periodically**: if there are new members or new introductions, offer a refresh
+
+If the user is actively monitoring a discovery group, attach this refresh cycle
+to heartbeat rather than treating it as a one-off manual step. The scheduling
+and refresh policy lives in `references/HEARTBEAT.md`; this playbook focuses on
+how to analyze the refreshed data and turn it into recommendations.
 
 Recommended minimum signal before proactive recommendation:
 
