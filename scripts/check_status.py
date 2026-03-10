@@ -61,6 +61,12 @@ _E2EE_TYPE_ORDER = {
 }
 
 
+def _message_time_value(message: dict[str, Any]) -> str:
+    """Return a sortable timestamp string for one message."""
+    timestamp = message.get("sent_at") or message.get("created_at")
+    return timestamp if isinstance(timestamp, str) else ""
+
+
 def ensure_local_upgrade_ready(credential_name: str = "default") -> dict[str, Any]:
     """Run local credential/database upgrades needed by the current skill version."""
     credential_layout = ensure_credential_storage_ready(credential_name)
@@ -100,7 +106,7 @@ def _message_sort_key(message: dict[str, Any]) -> tuple[Any, ...]:
         sender_did,
         has_server_seq,
         server_seq_value,
-        message.get("created_at", ""),
+        _message_time_value(message),
         _E2EE_TYPE_ORDER.get(message.get("type"), 99),
     )
 

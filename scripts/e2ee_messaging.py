@@ -67,6 +67,12 @@ _E2EE_USER_NOTICE = "This is an encrypted message."
 _E2EE_TYPE_ORDER = {"e2ee_init": 0, "e2ee_ack": 1, "e2ee_rekey": 2, "e2ee_msg": 3, "e2ee_error": 4}
 
 
+def _message_time_value(message: dict[str, Any]) -> str:
+    """Return a sortable timestamp string for one message."""
+    timestamp = message.get("sent_at") or message.get("created_at")
+    return timestamp if isinstance(timestamp, str) else ""
+
+
 def _message_sort_key(message: dict[str, Any]) -> tuple[Any, ...]:
     """Build a stable inbox ordering key with server_seq priority inside a sender stream."""
     sender_did = message.get("sender_did", "")
@@ -77,7 +83,7 @@ def _message_sort_key(message: dict[str, Any]) -> tuple[Any, ...]:
         sender_did,
         has_server_seq,
         server_seq_value,
-        message.get("created_at", ""),
+        _message_time_value(message),
         _E2EE_TYPE_ORDER.get(message.get("type"), 99),
     )
 
