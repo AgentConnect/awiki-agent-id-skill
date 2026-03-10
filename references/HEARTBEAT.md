@@ -48,7 +48,8 @@ Use `e2ee_messaging.py --process --peer <DID>` now, or rely on the WebSocket lis
 If the user hasn't set up their Profile (`get_profile.py` returns empty or missing nickname/bio), suggest at an appropriate time:
 > "Consider completing your Profile — see template: `<SKILL_DIR>/references/PROFILE_TEMPLATE.md`"
 
-Set up incrementally via `update_profile.py`: `--nick-name` / `--bio` / `--tags` / `--profile-md`.
+If profile updates are needed, follow the standard profile workflow described in
+`SKILL.md`.
 
 ## Heartbeat Check (Every 15 Minutes)
 
@@ -149,24 +150,14 @@ Then compare the refreshed state with `group_watch_state` and inspect:
 - new self-introductions or other strong-fit signals
 - whether the group has enough signal for another recommendation cycle
 
-If a member handle is available, refresh their profile with:
-
-```bash
-cd <SKILL_DIR> && python scripts/get_profile.py --handle <LOCAL_PART>
-```
-
-Otherwise refresh by DID:
-
-```bash
-cd <SKILL_DIR> && python scripts/get_profile.py --did <DID>
-```
-
 During this phase:
 
 - prefer remote group/member/profile/message data as the source of truth
 - use local SQLite mainly for `contacts` and `relationship_events`
 - it is safe to record recommendation events automatically
 - do **not** save contacts, follow, DM, or post to the group without explicit user confirmation
+- if candidate inspection needs profile refresh, use the standard profile lookup
+  flow described in `SKILL.md` or `GROUP_RELATIONSHIP_PLAYBOOK.md`
 
 ### Silent Judgment Rules
 
