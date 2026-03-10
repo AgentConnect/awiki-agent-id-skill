@@ -14,9 +14,11 @@ sys.path.insert(0, str(_scripts_dir))
 
 import local_store  # noqa: E402
 
-EXPECTED_V6_INDEXES = {
+EXPECTED_SCHEMA_INDEXES = {
     "idx_contacts_owner",
+    "idx_contacts_owner_source_group",
     "idx_messages_owner_thread",
+    "idx_messages_owner_thread_seq",
     "idx_messages_owner_direction",
     "idx_messages_owner_sender",
     "idx_messages_owner",
@@ -25,6 +27,14 @@ EXPECTED_V6_INDEXES = {
     "idx_e2ee_outbox_owner_sent_msg",
     "idx_e2ee_outbox_owner_sent_seq",
     "idx_e2ee_outbox_credential",
+    "idx_groups_owner_status_last_message",
+    "idx_groups_owner_slug",
+    "idx_groups_owner_updated",
+    "idx_group_members_owner_group_role",
+    "idx_group_members_owner_group_status",
+    "idx_relationship_events_owner_target_time",
+    "idx_relationship_events_owner_status_time",
+    "idx_relationship_events_owner_group",
 }
 
 
@@ -63,6 +73,9 @@ class TestSchema:
         assert "contacts" in tables
         assert "messages" in tables
         assert "e2ee_outbox" in tables
+        assert "groups" in tables
+        assert "group_members" in tables
+        assert "relationship_events" in tables
 
     def test_views_created(self, db):
         views = _schema_object_names(db, "view")
@@ -72,18 +85,18 @@ class TestSchema:
 
     def test_expected_indexes_created(self, db):
         indexes = _schema_object_names(db, "index")
-        assert EXPECTED_V6_INDEXES <= indexes
+        assert EXPECTED_SCHEMA_INDEXES <= indexes
 
     def test_schema_version(self, db):
         version = db.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 6
+        assert version == 9
 
     def test_ensure_schema_idempotent(self, db):
         """Calling ensure_schema multiple times is safe."""
         local_store.ensure_schema(db)
         local_store.ensure_schema(db)
         version = db.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 6
+        assert version == 9
 
     def test_wal_mode(self, db):
         mode = db.execute("PRAGMA journal_mode").fetchone()[0]
@@ -100,11 +113,34 @@ class TestSchema:
         outbox_columns = {
             row[1] for row in db.execute("PRAGMA table_info(e2ee_outbox)").fetchall()
         }
+        group_columns = {
+            row[1] for row in db.execute("PRAGMA table_info(groups)").fetchall()
+        }
+        group_member_columns = {
+            row[1] for row in db.execute("PRAGMA table_info(group_members)").fetchall()
+        }
+        relationship_event_columns = {
+            row[1]
+            for row in db.execute("PRAGMA table_info(relationship_events)").fetchall()
+        }
         assert "credential_name" in message_columns
         assert "title" in message_columns
         assert "owner_did" in contact_columns
         assert "owner_did" in message_columns
         assert "owner_did" in outbox_columns
+        assert "source_group_id" in contact_columns
+        assert "recommended_reason" in contact_columns
+        assert "followed" in contact_columns
+        assert "messaged" in contact_columns
+        assert "note" in contact_columns
+        assert "join_code" in group_columns
+        assert "join_code_expires_at" in group_columns
+        assert "group_owner_did" in group_columns
+        assert "member_did" in group_member_columns
+        assert "profile_url" in group_member_columns
+        assert "event_type" in relationship_event_columns
+        assert "source_group_id" in relationship_event_columns
+        assert "score" in relationship_event_columns
 
     def test_database_path(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AWIKI_DATA_DIR", str(tmp_path))
@@ -129,8 +165,8 @@ class TestSchema:
         after_indexes = _schema_object_names(db, "index")
         version = db.execute("PRAGMA user_version").fetchone()[0]
 
-        assert version == 6
-        assert EXPECTED_V6_INDEXES <= after_indexes
+        assert version == 9
+        assert EXPECTED_SCHEMA_INDEXES <= after_indexes
 
 
 class TestThreadId:
@@ -267,6 +303,35 @@ class TestUpsertContact:
         assert row["name"] == "Alice"
         assert row["handle"] == "alice"
 
+    def test_contact_sedimentation_fields_are_persisted(self, db):
+        local_store.upsert_contact(
+            db,
+            owner_did="did:alice",
+            did="did:bob",
+            source_type="meetup",
+            source_name="OpenClaw Meetup Hangzhou 2026",
+            source_group_id="grp_1",
+            connected_at="2026-03-10T10:00:00+00:00",
+            recommended_reason="Strong protocol fit",
+            followed=True,
+            messaged=False,
+            note="Met at the venue.",
+        )
+        row = db.execute(
+            """
+            SELECT source_type, source_name, source_group_id, connected_at,
+                   recommended_reason, followed, messaged, note
+            FROM contacts
+            WHERE owner_did='did:alice' AND did='did:bob'
+            """
+        ).fetchone()
+        assert row["source_type"] == "meetup"
+        assert row["source_group_id"] == "grp_1"
+        assert row["recommended_reason"] == "Strong protocol fit"
+        assert row["followed"] == 1
+        assert row["messaged"] == 0
+        assert row["note"] == "Met at the venue."
+
     def test_same_contact_can_exist_for_multiple_owners(self, db):
         local_store.upsert_contact(
             db,
@@ -304,6 +369,233 @@ class TestUpsertContact:
         ).fetchone()
         assert summary["contacts"] == 1
         assert row["owner_did"] == "did:new"
+
+    def test_rebind_owner_did_moves_groups_and_members(self, db):
+        local_store.upsert_group(
+            db,
+            owner_did="did:old",
+            group_id="grp_1",
+            name="Group One",
+            my_role="member",
+            membership_status="active",
+        )
+        local_store.replace_group_members(
+            db,
+            owner_did="did:old",
+            group_id="grp_1",
+            members=[{"user_id": "user_1", "did": "did:old", "role": "member"}],
+        )
+        local_store.append_relationship_event(
+            db,
+            owner_did="did:old",
+            target_did="did:bob",
+            event_type="ai_recommended",
+            source_group_id="grp_1",
+        )
+
+        summary = local_store.rebind_owner_did(
+            db,
+            old_owner_did="did:old",
+            new_owner_did="did:new",
+        )
+        group_row = db.execute(
+            "SELECT owner_did FROM groups WHERE group_id='grp_1'"
+        ).fetchone()
+        member_row = db.execute(
+            "SELECT owner_did FROM group_members WHERE group_id='grp_1' AND user_id='user_1'"
+        ).fetchone()
+        event_row = db.execute(
+            "SELECT owner_did FROM relationship_events WHERE target_did='did:bob'"
+        ).fetchone()
+        assert summary["groups"] == 1
+        assert summary["group_members"] == 1
+        assert summary["relationship_events"] == 1
+        assert group_row["owner_did"] == "did:new"
+        assert member_row["owner_did"] == "did:new"
+        assert event_row["owner_did"] == "did:new"
+
+
+class TestRelationshipEvents:
+    """Relationship-event persistence."""
+
+    def test_append_relationship_event(self, db):
+        event_id = local_store.append_relationship_event(
+            db,
+            owner_did="did:alice",
+            target_did="did:bob",
+            target_handle="bob.awiki.ai",
+            event_type="ai_recommended",
+            source_type="meetup",
+            source_name="OpenClaw Meetup Hangzhou 2026",
+            source_group_id="grp_1",
+            reason="Strong protocol fit",
+            score=0.91,
+            status="pending",
+            metadata={"why": "shared infra focus"},
+            credential_name="alice",
+        )
+        row = db.execute(
+            "SELECT * FROM relationship_events WHERE event_id = ?",
+            (event_id,),
+        ).fetchone()
+        assert row["owner_did"] == "did:alice"
+        assert row["target_did"] == "did:bob"
+        assert row["event_type"] == "ai_recommended"
+        assert row["source_group_id"] == "grp_1"
+        assert row["status"] == "pending"
+        assert row["score"] == 0.91
+
+
+class TestGroups:
+    """Local group-state persistence."""
+
+    def test_upsert_group_persists_owner_and_join_code(self, db):
+        local_store.upsert_group(
+            db,
+            owner_did="did:alice",
+            group_id="grp_1",
+            name="OpenClaw Meetup",
+            my_role="owner",
+            membership_status="active",
+            join_enabled=True,
+            join_code="314159",
+            join_code_expires_at="2026-03-10T12:00:00+00:00",
+            group_owner_did="did:alice",
+            group_owner_handle="alice.awiki.ai",
+            credential_name="alice",
+        )
+        row = db.execute(
+            "SELECT * FROM groups WHERE owner_did='did:alice' AND group_id='grp_1'"
+        ).fetchone()
+        assert row["name"] == "OpenClaw Meetup"
+        assert row["my_role"] == "owner"
+        assert row["join_enabled"] == 1
+        assert row["join_code"] == "314159"
+
+    def test_replace_group_members_replaces_snapshot(self, db):
+        local_store.replace_group_members(
+            db,
+            owner_did="did:alice",
+            group_id="grp_1",
+            members=[
+                {
+                    "user_id": "user_1",
+                    "did": "did:alice",
+                    "handle": "alice.awiki.ai",
+                    "profile_url": "https://awiki.ai/profiles/user_1",
+                    "role": "owner",
+                    "joined_at": "2026-03-10T00:00:00+00:00",
+                    "sent_message_count": 1,
+                },
+                {
+                    "user_id": "user_2",
+                    "did": "did:bob",
+                    "handle": "bob.awiki.ai",
+                    "profile_url": "https://awiki.ai/profiles/user_2",
+                    "role": "member",
+                    "joined_at": "2026-03-10T00:01:00+00:00",
+                    "sent_message_count": 0,
+                },
+            ],
+            credential_name="alice",
+        )
+        local_store.replace_group_members(
+            db,
+            owner_did="did:alice",
+            group_id="grp_1",
+            members=[
+                {
+                    "user_id": "user_1",
+                    "did": "did:alice",
+                    "handle": "alice.awiki.ai",
+                    "profile_url": "https://awiki.ai/profiles/user_1",
+                    "role": "owner",
+                    "joined_at": "2026-03-10T00:00:00+00:00",
+                    "sent_message_count": 2,
+                }
+            ],
+            credential_name="alice",
+        )
+        rows = db.execute(
+            """
+            SELECT user_id, profile_url, sent_message_count
+            FROM group_members
+            WHERE owner_did='did:alice' AND group_id='grp_1'
+            """
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0]["user_id"] == "user_1"
+        assert rows[0]["profile_url"] == "https://awiki.ai/profiles/user_1"
+        assert rows[0]["sent_message_count"] == 2
+
+    def test_delete_group_members_by_target_did(self, db):
+        local_store.replace_group_members(
+            db,
+            owner_did="did:alice",
+            group_id="grp_1",
+            members=[
+                {
+                    "user_id": "user_1",
+                    "did": "did:alice",
+                    "role": "owner",
+                },
+                {
+                    "user_id": "user_2",
+                    "did": "did:bob",
+                    "role": "member",
+                },
+            ],
+        )
+        deleted = local_store.delete_group_members(
+            db,
+            owner_did="did:alice",
+            group_id="grp_1",
+            target_did="did:bob",
+        )
+        count = db.execute(
+            "SELECT COUNT(*) FROM group_members WHERE owner_did='did:alice' AND group_id='grp_1'"
+        ).fetchone()[0]
+        assert deleted == 1
+        assert count == 1
+
+    def test_sync_group_member_from_system_event_updates_status(self, db):
+        local_store.upsert_group(
+            db,
+            owner_did="did:alice",
+            group_id="grp_1",
+            name="Group One",
+        )
+        synced = local_store.sync_group_member_from_system_event(
+            db,
+            owner_did="did:alice",
+            group_id="grp_1",
+            system_event={
+                "kind": "member_joined",
+                "subject": {
+                    "id": "user_2",
+                    "did": "did:bob",
+                    "handle": "bob.awiki.ai",
+                    "profile_url": "https://awiki.ai/profiles/user_2",
+                },
+                "actor": {
+                    "id": "user_2",
+                    "did": "did:bob",
+                    "handle": "bob.awiki.ai",
+                    "profile_url": "https://awiki.ai/profiles/user_2",
+                },
+            },
+        )
+        row = db.execute(
+            """
+            SELECT status, member_did, profile_url
+            FROM group_members
+            WHERE owner_did='did:alice' AND group_id='grp_1' AND user_id='user_2'
+            """
+        ).fetchone()
+        assert synced is True
+        assert row["status"] == "active"
+        assert row["member_did"] == "did:bob"
+        assert row["profile_url"] == "https://awiki.ai/profiles/user_2"
 
 
 class TestE2eeOutbox:
@@ -595,12 +887,138 @@ class TestMigration:
         migrated_outbox = conn.execute(
             "SELECT owner_did FROM e2ee_outbox WHERE outbox_id='o1'"
         ).fetchone()
+        migrated_new_tables = {
+            row[0]
+            for row in conn.execute(
+                """
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name IN ('groups', 'group_members', 'relationship_events')
+                """
+            ).fetchall()
+        }
         conn.close()
 
-        assert version == 6
+        assert version == 9
         assert migrated_message["owner_did"] == "did:alice"
         assert migrated_contact["owner_did"] == "did:alice"
         assert migrated_outbox["owner_did"] == "did:alice"
+        assert migrated_new_tables == {"groups", "group_members", "relationship_events"}
+
+    def test_migrate_real_v6_schema_to_v9_without_manual_contact_column_patch(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A historical v6 database should upgrade even when contacts lacks v8 fields."""
+        monkeypatch.setenv("AWIKI_DATA_DIR", str(tmp_path))
+        db_dir = tmp_path / "database"
+        db_dir.mkdir(parents=True, exist_ok=True)
+        db_path = db_dir / "awiki.db"
+
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        conn.executescript("""
+            CREATE TABLE contacts (
+                owner_did TEXT NOT NULL DEFAULT '',
+                did TEXT NOT NULL,
+                name TEXT,
+                handle TEXT,
+                nick_name TEXT,
+                bio TEXT,
+                profile_md TEXT,
+                tags TEXT,
+                relationship TEXT,
+                first_seen_at TEXT,
+                last_seen_at TEXT,
+                metadata TEXT,
+                PRIMARY KEY (owner_did, did)
+            );
+            CREATE TABLE messages (
+                msg_id TEXT NOT NULL,
+                owner_did TEXT NOT NULL DEFAULT '',
+                thread_id TEXT NOT NULL,
+                direction INTEGER NOT NULL DEFAULT 0,
+                sender_did TEXT,
+                receiver_did TEXT,
+                group_id TEXT,
+                group_did TEXT,
+                content_type TEXT DEFAULT 'text',
+                content TEXT,
+                title TEXT,
+                server_seq INTEGER,
+                sent_at TEXT,
+                stored_at TEXT NOT NULL,
+                is_e2ee INTEGER DEFAULT 0,
+                is_read INTEGER DEFAULT 0,
+                sender_name TEXT,
+                metadata TEXT,
+                credential_name TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (msg_id, owner_did)
+            );
+            CREATE TABLE e2ee_outbox (
+                outbox_id TEXT PRIMARY KEY,
+                owner_did TEXT NOT NULL DEFAULT '',
+                peer_did TEXT NOT NULL,
+                session_id TEXT,
+                original_type TEXT NOT NULL DEFAULT 'text',
+                plaintext TEXT NOT NULL,
+                local_status TEXT NOT NULL DEFAULT 'queued',
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                sent_msg_id TEXT,
+                sent_server_seq INTEGER,
+                last_error_code TEXT,
+                retry_hint TEXT,
+                failed_msg_id TEXT,
+                failed_server_seq INTEGER,
+                metadata TEXT,
+                last_attempt_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                credential_name TEXT NOT NULL DEFAULT ''
+            );
+            PRAGMA user_version = 6;
+        """)
+        conn.execute(
+            """
+            INSERT INTO contacts
+            (owner_did, did, name, relationship, first_seen_at, last_seen_at)
+            VALUES
+            ('did:owner', 'did:peer', 'Peer', 'following',
+             '2026-03-10T00:00:00+00:00', '2026-03-10T00:00:00+00:00')
+            """
+        )
+        conn.commit()
+
+        local_store.ensure_schema(conn)
+
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        contact_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(contacts)").fetchall()
+        }
+        indexes = _schema_object_names(conn, "index")
+        migrated_contact = conn.execute(
+            """
+            SELECT owner_did, did, source_group_id, recommended_reason, followed, messaged, note
+            FROM contacts
+            WHERE owner_did = 'did:owner' AND did = 'did:peer'
+            """
+        ).fetchone()
+        conn.close()
+
+        assert version == local_store._SCHEMA_VERSION
+        assert "source_group_id" in contact_columns
+        assert "recommended_reason" in contact_columns
+        assert "followed" in contact_columns
+        assert "messaged" in contact_columns
+        assert "note" in contact_columns
+        assert "idx_contacts_owner_source_group" in indexes
+        assert migrated_contact["owner_did"] == "did:owner"
+        assert migrated_contact["did"] == "did:peer"
+        assert migrated_contact["source_group_id"] is None
+        assert migrated_contact["recommended_reason"] is None
+        assert migrated_contact["followed"] == 0
+        assert migrated_contact["messaged"] == 0
+        assert migrated_contact["note"] is None
 
     def test_rebind_owner_did_moves_messages_without_duplicate_conflicts(self, db):
         local_store.store_message(

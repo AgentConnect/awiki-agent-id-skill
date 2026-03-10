@@ -75,20 +75,21 @@ python scripts/manage_content.py --rename --slug jd --new-slug hiring
 python scripts/manage_content.py --delete --slug jd
 
 # Group management
-python scripts/manage_group.py --create --group-name "GroupName" --description "Description"
-python scripts/manage_group.py --invite --group-id GID --target-did "<DID>"
-python scripts/manage_group.py --join --group-id GID --invite-id IID
+python scripts/manage_group.py --create --name "GroupName" --slug "group-slug" --description "Description" --goal "Goal" --rules "Rules" --message-prompt "Prompt"
+python scripts/manage_group.py --get-join-code --group-id GID
+python scripts/manage_group.py --join --passcode 314159
 python scripts/manage_group.py --members --group-id GID
 
 # E2EE encrypted communication
-python scripts/e2ee_messaging.py --handshake "<DID>"
-python scripts/e2ee_messaging.py --process --peer "<DID>"
-python scripts/e2ee_messaging.py --send "<DID>" --content "secret"
+python scripts/e2ee_messaging.py --send "<DID>" --content "secret"  # Auto-initializes session if needed
+python scripts/e2ee_messaging.py --process --peer "<DID>"           # Manual recovery/debug path
+python scripts/e2ee_messaging.py --handshake "<DID>"                # Optional advanced pre-init
 
 # Unified status check
 python scripts/check_status.py                              # Default-on E2EE auto-processing
 python scripts/check_status.py --no-auto-e2ee               # Disable E2EE auto-processing
 python scripts/check_status.py --credential alice           # Specify credential
+python scripts/check_status.py --upgrade-only               # Run local upgrade / migration checks only
 
 # WebSocket listener (background service management)
 python scripts/ws_listener.py install --credential default --mode smart  # Install and start
@@ -102,8 +103,17 @@ python scripts/ws_listener.py run --credential default --mode smart -v  # Run in
 # Local data queries (read-only SQL against SQLite)
 python scripts/query_db.py "SELECT * FROM threads LIMIT 10"
 python scripts/query_db.py "SELECT * FROM contacts"
-python scripts/query_db.py --credential alice "SELECT COUNT(*) as cnt FROM messages"
+python scripts/query_db.py "SELECT COUNT(*) as cnt FROM messages WHERE credential_name='alice'"
+python scripts/manage_group.py --get --group-id GID
+python scripts/manage_group.py --members --group-id GID
+python scripts/manage_group.py --list-messages --group-id GID
+python scripts/query_db.py "SELECT * FROM groups WHERE owner_did='did:me' ORDER BY last_message_at DESC LIMIT 10"
+python scripts/query_db.py "SELECT * FROM group_members WHERE owner_did='did:me' AND group_id='grp_xxx' LIMIT 20"
+python scripts/query_db.py "SELECT * FROM relationship_events WHERE owner_did='did:me' AND status='pending' ORDER BY created_at DESC LIMIT 20"
+python scripts/manage_contacts.py --save-from-group --target-did "<DID>" --target-handle alice.awiki.ai --source-type meetup --source-name "OpenClaw Meetup Hangzhou 2026" --source-group-id GID --reason "Strong fit"
 ```
+
+For active group recommendation or refresh cycles, prefer remote group/member/profile/message data. Use local SQLite mainly for `contacts` and `relationship_events`.
 
 ## Architecture
 
@@ -125,9 +135,10 @@ Three-layer architecture: CLI script layer -> Persistence layer -> Core utility 
 ### scripts/ — CLI Script Layer
 
 - **credential_store.py** / **e2ee_store.py**: Credential and E2EE state persistence to `~/.openclaw/credentials/awiki-agent-id-message/` directory (JSON format, 600 permissions)
-- **local_store.py**: SQLite local storage — contacts + messages + `e2ee_outbox` three tables, threads/inbox/outbox views. Single shared database at `<DATA_DIR>/database/awiki.db`. Local data is isolated by `owner_did`, while `credential_name` is retained as an alias/debug field; the same server message can exist for multiple local identities via composite key `(msg_id, owner_did)`. Messages also support an optional plaintext `title` field. `e2ee_outbox` tracks encrypted send attempts, peer-side failures, and resend/drop decisions. WAL mode for concurrent read/write. Sync API (sqlite3 stdlib), ws_listener wraps via `asyncio.to_thread()`. Schema versioned via `PRAGMA user_version` (current: v6)
-- **query_db.py**: Read-only SQL query CLI — accepts a SELECT statement, executes against local SQLite, returns JSON. Rejects write operations and multi-statement queries
+- **local_store.py**: SQLite local storage — contacts + `relationship_events` + messages + `groups` + `group_members` + `e2ee_outbox`, plus threads/inbox/outbox views. Single shared database at `<DATA_DIR>/database/awiki.db`. Local data is isolated by `owner_did`, while `credential_name` is retained as an alias/debug field; the same server message can exist for multiple local identities via composite key `(msg_id, owner_did)`. `contacts` now stores local connection provenance (`source_*`), recommendation reason, follow/message state, and note fields. `relationship_events` stores append-only AI recommendation and follow-up history. Messages also support an optional plaintext `title` field. `groups` stores local discovery-group snapshots (owner/member role, membership status, join code state, sync cursors), and `group_members` caches the latest active-member snapshot per group, including `profile_url`. `e2ee_outbox` tracks encrypted send attempts, peer-side failures, and resend/drop decisions. WAL mode for concurrent read/write. Sync API (sqlite3 stdlib), ws_listener wraps via `asyncio.to_thread()`. Schema versioned via `PRAGMA user_version` (current: v9)
+- **query_db.py**: Read-only SQL query CLI — accepts a SELECT statement, executes against local SQLite, returns JSON. Rejects write operations and multi-statement queries. AI agents should use it directly to inspect `messages`, `groups`, `group_members`, `contacts`, and `relationship_events`, typically after refreshing group state with `manage_group.py --get/--members/--list-messages`
 - **search_users.py**: User search (用户搜索) — search users by semantic matching via `/user-service/users/rpc` search method
+- **manage_contacts.py**: Local relationship-sedimentation CLI — records AI recommendations, saves confirmed contacts from groups, and updates follow/message/note state without writing SQL directly
 - **check_status.py**: Unified status check entry point — chains identity verification, inbox classification summary, and server_seq-aware E2EE auto-processing. Outputs structured JSON. Called by Agent session startup protocol and heartbeat
 - **listener_config.py**: `ListenerConfig` + `RoutingRules` — WebSocket listener configuration module. Defines dual webhook endpoints, routing modes (agent-all/smart/wake-all), message routing rules and E2EE transparent processing parameters. Supports unified settings.json (`listener` sub-object, at `<DATA_DIR>/config/settings.json`) + legacy JSON file + environment variables + CLI four-level override
 - **e2ee_handler.py**: `E2eeHandler` — E2EE transparent handler for WebSocket listener. Intercepts E2EE messages before `classify_message`: protocol messages (init/rekey/error) are handled internally without forwarding, encrypted messages (e2ee_msg) are decrypted and forwarded as plaintext. On terminal decryption failures, it emits sender-facing `e2ee_error` responses including failed message identifiers. asyncio.Lock protects concurrency, periodic state saving
@@ -189,7 +200,7 @@ When modifying code logic, the corresponding file's `[INPUT]/[OUTPUT]/[POS]` hea
 - All network operations must use async/await (httpx AsyncClient)
 - `.credentials/` directory must remain gitignored, credentials stored at `~/.openclaw/credentials/awiki-agent-id-message/`
 - `.data/` directory must remain gitignored, data stored at `~/.openclaw/workspace/data/awiki-agent-id-message/`
-- API reference documents are in the `references/` directory (did-auth-api.md, profile-api.md, messaging-api.md, relationship-api.md, e2ee-protocol.md, local-store-schema.md)
+- API and support reference documents are in the `references/` directory (RULES.md, HEARTBEAT.md, PROFILE_TEMPLATE.md, WEBSOCKET_LISTENER.md, GROUP_RELATIONSHIP_PLAYBOOK.md, GROUP_RECOMMENDATION_PROMPTS.md, e2ee-protocol.md, local-store-schema.md, UPGRADE_NOTES.md)
 
 ## Environment Variables
 

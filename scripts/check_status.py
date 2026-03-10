@@ -1,14 +1,16 @@
-"""Unified status check: identity verification + inbox categorized summary + E2EE auto-processing.
+"""Unified status check: local upgrade + identity verification + inbox summary.
 
 Usage:
     python scripts/check_status.py                     # Status check with E2EE auto-processing
     python scripts/check_status.py --no-auto-e2ee      # Disable E2EE auto-processing
     python scripts/check_status.py --credential alice   # Specify credential
+    python scripts/check_status.py --upgrade-only       # Run local upgrade and exit
 
 [INPUT]: SDK (RPC calls, E2eeClient), credential_store (authenticator factory),
          e2ee_store, credential_migration, database_migration, logging_config
-[OUTPUT]: Structured JSON status report (identity + inbox + e2ee_auto + e2ee_sessions),
-          with inbox refreshed after optional auto-processing
+[OUTPUT]: Structured JSON status report (local upgrade + identity + inbox +
+          e2ee_auto + e2ee_sessions), with inbox refreshed after optional
+          auto-processing
 [POS]: Unified status check entry point for Agent session startup and heartbeat calls
        with default-on, server_seq-aware E2EE auto-processing (HPKE E2EE scheme)
 
@@ -21,7 +23,6 @@ import argparse
 import asyncio
 import json
 import logging
-import sys
 from datetime import datetime, timezone
 from typing import Any
 
@@ -48,7 +49,42 @@ logger = logging.getLogger(__name__)
 _E2EE_HANDSHAKE_TYPES = {"e2ee_init", "e2ee_ack", "e2ee_rekey", "e2ee_error"}
 _E2EE_SESSION_SETUP_TYPES = {"e2ee_init", "e2ee_rekey"}
 _E2EE_MSG_TYPES = {"e2ee_init", "e2ee_ack", "e2ee_msg", "e2ee_rekey", "e2ee_error"}
-_E2EE_TYPE_ORDER = {"e2ee_init": 0, "e2ee_ack": 1, "e2ee_rekey": 2, "e2ee_msg": 3, "e2ee_error": 4}
+_E2EE_TYPE_ORDER = {
+    "e2ee_init": 0,
+    "e2ee_ack": 1,
+    "e2ee_rekey": 2,
+    "e2ee_msg": 3,
+    "e2ee_error": 4,
+}
+
+
+def ensure_local_upgrade_ready(credential_name: str = "default") -> dict[str, Any]:
+    """Run local credential/database upgrades needed by the current skill version."""
+    credential_layout = ensure_credential_storage_ready(credential_name)
+    local_database = ensure_local_database_ready()
+    ready = (
+        credential_layout.get("credential_ready", False)
+        and local_database.get("status") != "error"
+    )
+
+    performed: list[str] = []
+    migration = credential_layout.get("migration")
+    if isinstance(migration, dict) and migration.get("status") not in {
+        None,
+        "not_needed",
+    }:
+        performed.append("credential_layout")
+    if local_database.get("status") == "migrated":
+        performed.append("local_database")
+
+    return {
+        "status": "ready" if ready else "error",
+        "credential_ready": credential_layout.get("credential_ready", False),
+        "database_ready": local_database.get("status") != "error",
+        "performed": performed,
+        "credential_layout": credential_layout,
+        "local_database": local_database,
+    }
 
 
 def _message_sort_key(message: dict[str, Any]) -> tuple[Any, ...]:
@@ -73,9 +109,8 @@ def _is_user_visible_message_type(msg_type: str) -> bool:
 
 # ---------- E2EE helpers ----------
 
-def _load_or_create_e2ee_client(
-    local_did: str, credential_name: str
-) -> E2eeClient:
+
+def _load_or_create_e2ee_client(local_did: str, credential_name: str) -> E2eeClient:
     """Load existing E2EE client state from disk, or create a new client if absent."""
     # Load E2EE keys from credential
     cred = load_identity(credential_name)
@@ -101,12 +136,23 @@ def _save_e2ee_client(client: E2eeClient, credential_name: str) -> None:
     save_e2ee_state(client.export_state(), credential_name)
 
 
-async def _send_msg(http_client, sender_did, receiver_did, msg_type, content, *, auth, credential_name="default"):
+async def _send_msg(
+    http_client,
+    sender_did,
+    receiver_did,
+    msg_type,
+    content,
+    *,
+    auth,
+    credential_name="default",
+):
     """Send a message (E2EE or plain)."""
     if isinstance(content, dict):
         content = json.dumps(content)
     return await authenticated_rpc_call(
-        http_client, MESSAGE_RPC, "send",
+        http_client,
+        MESSAGE_RPC,
+        "send",
         params={
             "sender_did": sender_did,
             "receiver_did": receiver_did,
@@ -119,6 +165,7 @@ async def _send_msg(http_client, sender_did, receiver_did, msg_type, content, *,
 
 
 # ---------- Core functions ----------
+
 
 async def check_identity(credential_name: str = "default") -> dict[str, Any]:
     """Check identity status; automatically refresh expired JWT."""
@@ -150,8 +197,11 @@ async def check_identity(credential_name: str = "default") -> dict[str, Any]:
     try:
         async with create_user_service_client(config) as client:
             await authenticated_rpc_call(
-                client, AUTH_RPC, "get_me",
-                auth=auth, credential_name=credential_name,
+                client,
+                AUTH_RPC,
+                "get_me",
+                auth=auth,
+                credential_name=credential_name,
             )
             result["jwt_valid"] = True
             # Check if token was refreshed (authenticated_rpc_call auto-persists new JWT)
@@ -178,9 +228,12 @@ async def summarize_inbox(
     try:
         async with create_molt_message_client(config) as client:
             inbox = await authenticated_rpc_call(
-                client, MESSAGE_RPC, "get_inbox",
+                client,
+                MESSAGE_RPC,
+                "get_inbox",
                 params={"user_did": data["did"], "limit": 50},
-                auth=auth, credential_name=credential_name,
+                auth=auth,
+                credential_name=credential_name,
             )
     except Exception as e:
         return {"status": "error", "error": str(e), "total": 0}
@@ -236,17 +289,17 @@ async def auto_process_e2ee(
         async with create_molt_message_client(config) as client:
             # Get inbox
             inbox = await authenticated_rpc_call(
-                client, MESSAGE_RPC, "get_inbox",
+                client,
+                MESSAGE_RPC,
+                "get_inbox",
                 params={"user_did": data["did"], "limit": 50},
-                auth=auth, credential_name=credential_name,
+                auth=auth,
+                credential_name=credential_name,
             )
             messages = inbox.get("messages", [])
 
             # Filter E2EE protocol messages (excluding encrypted messages themselves)
-            e2ee_msgs = [
-                m for m in messages
-                if m.get("type") in _E2EE_HANDSHAKE_TYPES
-            ]
+            e2ee_msgs = [m for m in messages if m.get("type") in _E2EE_HANDSHAKE_TYPES]
 
             if not e2ee_msgs:
                 return {"status": "ok"}
@@ -260,7 +313,11 @@ async def auto_process_e2ee(
             for msg in e2ee_msgs:
                 msg_type = msg["type"]
                 sender_did = msg.get("sender_did", "")
-                content = json.loads(msg["content"]) if isinstance(msg.get("content"), str) else msg.get("content", {})
+                content = (
+                    json.loads(msg["content"])
+                    if isinstance(msg.get("content"), str)
+                    else msg.get("content", {})
+                )
 
                 try:
                     if msg_type == "e2ee_error":
@@ -269,18 +326,27 @@ async def auto_process_e2ee(
                             peer_did=sender_did,
                             content=content,
                         )
-                    responses = await e2ee_client.process_e2ee_message(msg_type, content)
+                    responses = await e2ee_client.process_e2ee_message(
+                        msg_type, content
+                    )
                     session_ready = True
                     terminal_error_notified = any(
                         resp_type == "e2ee_error" for resp_type, _ in responses
                     )
                     if msg_type in _E2EE_SESSION_SETUP_TYPES:
-                        session_ready = e2ee_client.has_session_id(content.get("session_id"))
+                        session_ready = e2ee_client.has_session_id(
+                            content.get("session_id")
+                        )
                     # Route responses to sender_did
                     for resp_type, resp_content in responses:
                         await _send_msg(
-                            client, data["did"], sender_did, resp_type, resp_content,
-                            auth=auth, credential_name=credential_name,
+                            client,
+                            data["did"],
+                            sender_did,
+                            resp_type,
+                            resp_content,
+                            auth=auth,
+                            credential_name=credential_name,
                         )
 
                     if session_ready:
@@ -298,9 +364,12 @@ async def auto_process_e2ee(
             # Mark processed messages as read
             if processed_ids:
                 await authenticated_rpc_call(
-                    client, MESSAGE_RPC, "mark_read",
+                    client,
+                    MESSAGE_RPC,
+                    "mark_read",
                     params={"user_did": data["did"], "message_ids": processed_ids},
-                    auth=auth, credential_name=credential_name,
+                    auth=auth,
+                    credential_name=credential_name,
                 )
 
             # Save E2EE state
@@ -323,7 +392,9 @@ async def check_status(
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
-    report["credential_layout"] = ensure_credential_storage_ready(credential_name)
+    report["local_upgrade"] = ensure_local_upgrade_ready(credential_name)
+    report["credential_layout"] = report["local_upgrade"]["credential_layout"]
+    report["local_database"] = report["local_upgrade"]["local_database"]
     if not report["credential_layout"]["credential_ready"]:
         report["identity"] = {
             "status": "storage_migration_required",
@@ -336,7 +407,6 @@ async def check_status(
         report["e2ee_sessions"] = {"active": 0}
         return report
 
-    report["local_database"] = ensure_local_database_ready()
     if report["local_database"]["status"] == "error":
         report["identity"] = {
             "status": "local_database_migration_failed",
@@ -384,19 +454,38 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="Unified status check")
     parser.add_argument(
-        "--no-auto-e2ee", action="store_true",
+        "--upgrade-only",
+        action="store_true",
+        help="Run local skill upgrade checks/migrations and exit",
+    )
+    parser.add_argument(
+        "--no-auto-e2ee",
+        action="store_true",
         help="Disable automatic processing of E2EE protocol messages in inbox",
     )
     parser.add_argument(
-        "--credential", type=str, default="default",
+        "--credential",
+        type=str,
+        default="default",
         help="Credential name (default: default)",
     )
     args = parser.parse_args()
     logging.getLogger(__name__).info(
-        "check_status CLI started credential=%s auto_e2ee=%s",
+        "check_status CLI started credential=%s auto_e2ee=%s upgrade_only=%s",
         args.credential,
         not args.no_auto_e2ee,
+        args.upgrade_only,
     )
+
+    if args.upgrade_only:
+        report = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "local_upgrade": ensure_local_upgrade_ready(args.credential),
+        }
+        report["credential_layout"] = report["local_upgrade"]["credential_layout"]
+        report["local_database"] = report["local_upgrade"]["local_database"]
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return
 
     report = asyncio.run(check_status(args.credential, not args.no_auto_e2ee))
     print(json.dumps(report, indent=2, ensure_ascii=False))

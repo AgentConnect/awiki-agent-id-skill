@@ -1,20 +1,19 @@
 """E2EE end-to-end encrypted messaging (HPKE scheme, with cross-process state persistence).
 
 Usage:
-    # Initiate an E2EE session (one-step initialization, session immediately ACTIVE)
-    uv run python scripts/e2ee_messaging.py --handshake "did:wba:awiki.ai:user:abc123"
-
-    # Send an encrypted message (requires initialization first)
+    # Send an encrypted message (normal path; auto-initializes the session if needed)
     uv run python scripts/e2ee_messaging.py --send "did:wba:awiki.ai:user:abc123" --content "secret message"
+
+    # Optional advanced mode: pre-initialize an E2EE session explicitly
+    uv run python scripts/e2ee_messaging.py --handshake "did:wba:awiki.ai:user:abc123"
 
     # Process E2EE messages in inbox (auto-handle init + decrypt)
     uv run python scripts/e2ee_messaging.py --process --peer "did:wba:awiki.ai:user:abc123"
 
 Supported workflows:
-1. Alice: --handshake <Bob's DID>       -> Initiate session (one-step init, immediately ACTIVE)
-2. Bob:   --process --peer <Alice's DID> -> Process inbox (receive e2ee_init, session directly ACTIVE)
-3. Alice: --send <Bob's DID> --content "secret" -> Send encrypted message
-4. Bob:   --process --peer <Alice's DID> -> Restore session from disk, decrypt message
+1. Alice: --send <Bob's DID> --content "secret" -> Auto-init session if needed, then send encrypted message
+2. Bob:   --process --peer <Alice's DID>        -> Process inbox, accept e2ee_init, then decrypt message
+3. Optional advanced: --handshake <Bob's DID>   -> Pre-warm a session for debugging or recovery
 
 [INPUT]: SDK (E2eeClient, RPC calls), credential_store (load identity credentials),
          e2ee_store (E2EE state persistence), logging_config
@@ -86,6 +85,14 @@ def _message_sort_key(message: dict[str, Any]) -> tuple[Any, ...]:
 def _render_user_visible_e2ee_text(plaintext: str) -> str:
     """Render the minimal user-facing text for a decrypted E2EE message."""
     return f"{_E2EE_USER_NOTICE}\n{plaintext}"
+
+
+def _render_auto_session_notice(peer_did: str) -> str:
+    """Render the user-facing notice for the send-first auto-init flow."""
+    return (
+        "No active E2EE session found; sent automatic init before the encrypted payload. "
+        f"Peer: {peer_did}"
+    )
 
 
 def _classify_decrypt_error(exc: BaseException) -> tuple[str, str]:
@@ -177,7 +184,7 @@ async def initiate_handshake(
     peer_did: str,
     credential_name: str = "default",
 ) -> None:
-    """Initiate an E2EE session (one-step initialization)."""
+    """Manually initiate an E2EE session (advanced/manual path)."""
     config = SDKConfig()
     auth_result = create_authenticator(credential_name, config)
     if auth_result is None:
@@ -198,6 +205,7 @@ async def initiate_handshake(
     print(f"  session_id: {content.get('session_id')}")
     print(f"  peer_did  : {peer_did}")
     print("Session is ACTIVE; you can send encrypted messages now")
+    print("Tip: --send auto-initializes a session when needed; manual handshake is mainly for debugging or pre-warming.")
 
 
 async def send_encrypted(
@@ -208,7 +216,7 @@ async def send_encrypted(
     outbox_id: str | None = None,
     title: str | None = None,
 ) -> None:
-    """Send an encrypted message."""
+    """Send an encrypted message through the normal send-first flow."""
     config = SDKConfig()
     auth_result = create_authenticator(credential_name, config)
     if auth_result is None:
@@ -222,10 +230,11 @@ async def send_encrypted(
     init_msgs = await e2ee_client.ensure_active_session(peer_did)
 
     async with create_molt_message_client(config) as client:
+        if init_msgs:
+            print(_render_auto_session_notice(peer_did))
         for init_type, init_content in init_msgs:
             await _send_msg(client, data["did"], peer_did, init_type, init_content,
                             auth=auth, credential_name=credential_name)
-            print(f"Session expired/missing, auto re-handshake sent to {peer_did}")
 
         enc_type, enc_content = e2ee_client.encrypt_message(peer_did, plaintext, original_type)
         session_id = enc_content.get("session_id")
@@ -421,12 +430,25 @@ async def process_inbox(
 def main() -> None:
     configure_logging(console_level=None, mirror_stdio=True)
 
-    parser = argparse.ArgumentParser(description="E2EE end-to-end encrypted messaging (HPKE scheme)")
+    parser = argparse.ArgumentParser(
+        description=(
+            "E2EE end-to-end encrypted messaging (normal path: --send "
+            "auto-initializes the session if needed)"
+        )
+    )
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--handshake", type=str, help="Initiate E2EE session with a specific DID or handle")
-    group.add_argument("--send", type=str, help="Send encrypted message to a specific DID or handle")
+    group.add_argument(
+        "--handshake",
+        type=str,
+        help="Optional advanced mode: pre-initialize an E2EE session with a specific DID or handle",
+    )
+    group.add_argument(
+        "--send",
+        type=str,
+        help="Send encrypted message and auto-initialize or rekey the E2EE session if needed",
+    )
     group.add_argument("--process", action="store_true",
-                       help="Process E2EE messages in inbox")
+                       help="Process E2EE messages in inbox manually (recovery/debug path)")
     group.add_argument("--list-failed", action="store_true",
                        help="List failed local E2EE outbox records")
     group.add_argument("--retry", type=str,

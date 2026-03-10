@@ -42,8 +42,8 @@ def _index_names(conn: sqlite3.Connection) -> set[str]:
 
 
 @pytest.fixture()
-def prepared_v6_database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Create a v6 database with selected indexes removed."""
+def prepared_ready_database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Create a ready database with selected indexes removed."""
     monkeypatch.setenv("AWIKI_DATA_DIR", str(tmp_path))
 
     conn = local_store.get_connection()
@@ -57,15 +57,15 @@ def prepared_v6_database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Pat
 
 
 def test_ensure_local_database_ready_repairs_ready_database(
-    prepared_v6_database: Path,
+    prepared_ready_database: Path,
 ) -> None:
     """Ready-state checks should repair missing indexes before returning."""
     result = database_migration.ensure_local_database_ready()
 
     assert result["status"] == "ready"
-    assert result["db_path"] == str(prepared_v6_database)
-    assert result["before_version"] == 6
-    assert result["after_version"] == 6
+    assert result["db_path"] == str(prepared_ready_database)
+    assert result["before_version"] == local_store._SCHEMA_VERSION
+    assert result["after_version"] == local_store._SCHEMA_VERSION
 
     conn = local_store.get_connection()
     try:
@@ -75,15 +75,15 @@ def test_ensure_local_database_ready_repairs_ready_database(
 
 
 def test_migrate_local_database_repairs_ready_database_without_backup(
-    prepared_v6_database: Path,
+    prepared_ready_database: Path,
 ) -> None:
     """The standalone migration helper should self-heal ready databases."""
     result = database_migration.migrate_local_database()
 
     assert result["status"] == "ready"
-    assert result["db_path"] == str(prepared_v6_database)
-    assert result["before_version"] == 6
-    assert result["after_version"] == 6
+    assert result["db_path"] == str(prepared_ready_database)
+    assert result["before_version"] == local_store._SCHEMA_VERSION
+    assert result["after_version"] == local_store._SCHEMA_VERSION
     assert result["backup_path"] is None
 
     conn = local_store.get_connection()
@@ -91,3 +91,91 @@ def test_migrate_local_database_repairs_ready_database_without_backup(
         assert _REPAIRED_INDEXES <= _index_names(conn)
     finally:
         conn.close()
+
+
+def test_migrate_local_database_treats_outdated_v6_database_as_legacy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Outdated schemas should trigger backup + migration instead of ready-state repair."""
+    monkeypatch.setenv("AWIKI_DATA_DIR", str(tmp_path))
+    db_dir = tmp_path / "database"
+    db_dir.mkdir(parents=True, exist_ok=True)
+    db_path = db_dir / "awiki.db"
+
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE contacts (
+            owner_did TEXT NOT NULL DEFAULT '',
+            did TEXT NOT NULL,
+            name TEXT,
+            handle TEXT,
+            nick_name TEXT,
+            bio TEXT,
+            profile_md TEXT,
+            tags TEXT,
+            relationship TEXT,
+            first_seen_at TEXT,
+            last_seen_at TEXT,
+            metadata TEXT,
+            PRIMARY KEY (owner_did, did)
+        );
+        CREATE TABLE messages (
+            msg_id TEXT NOT NULL,
+            owner_did TEXT NOT NULL DEFAULT '',
+            thread_id TEXT NOT NULL,
+            direction INTEGER NOT NULL DEFAULT 0,
+            sender_did TEXT,
+            receiver_did TEXT,
+            group_id TEXT,
+            group_did TEXT,
+            content_type TEXT DEFAULT 'text',
+            content TEXT,
+            title TEXT,
+            server_seq INTEGER,
+            sent_at TEXT,
+            stored_at TEXT NOT NULL,
+            is_e2ee INTEGER DEFAULT 0,
+            is_read INTEGER DEFAULT 0,
+            sender_name TEXT,
+            metadata TEXT,
+            credential_name TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (msg_id, owner_did)
+        );
+        CREATE TABLE e2ee_outbox (
+            outbox_id TEXT PRIMARY KEY,
+            owner_did TEXT NOT NULL DEFAULT '',
+            peer_did TEXT NOT NULL,
+            session_id TEXT,
+            original_type TEXT NOT NULL DEFAULT 'text',
+            plaintext TEXT NOT NULL,
+            local_status TEXT NOT NULL DEFAULT 'queued',
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            sent_msg_id TEXT,
+            sent_server_seq INTEGER,
+            last_error_code TEXT,
+            retry_hint TEXT,
+            failed_msg_id TEXT,
+            failed_server_seq INTEGER,
+            metadata TEXT,
+            last_attempt_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            credential_name TEXT NOT NULL DEFAULT ''
+        );
+        PRAGMA user_version = 6;
+    """)
+    conn.commit()
+    conn.close()
+
+    detection = database_migration.detect_local_database_layout()
+    result = database_migration.migrate_local_database()
+
+    assert detection["status"] == "legacy"
+    assert detection["before_version"] == 6
+    assert result["status"] == "migrated"
+    assert result["before_version"] == 6
+    assert result["after_version"] == local_store._SCHEMA_VERSION
+    assert result["backup_path"] is not None
+    assert Path(result["backup_path"]).exists()
