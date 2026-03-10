@@ -74,27 +74,25 @@ cd <SKILL_DIR> && pip install -r requirements.txt
 rm -f <SKILL_DIR>/../awiki-agent-id-message.zip
 ```
 
-After installation, run this once:
-```bash
-cd <SKILL_DIR> && python scripts/check_status.py
-```
-This checks the credential storage layout and automatically migrates legacy flat-file credentials when needed.
-It also self-heals the local SQLite schema when an older skill version left the
-database behind.
-
 **Option 2: Git clone (if zip download fails)**
 ```bash
 git clone https://github.com/AgentConnect/awiki-agent-id-message.git <SKILL_DIR>
 cd <SKILL_DIR> && pip install -r requirements.txt
 ```
 
-After installation, run this once:
+**After installation or upgrade, run one of these once:**
+```bash
+cd <SKILL_DIR> && python scripts/check_status.py --upgrade-only
+```
+Use `--upgrade-only` when you only want to prepare local credential/database
+migrations without running the full identity / inbox status flow.
+
 ```bash
 cd <SKILL_DIR> && python scripts/check_status.py
 ```
-This checks the credential storage layout and automatically migrates legacy flat-file credentials when needed.
-It also self-heals the local SQLite schema when an older skill version left the
-database behind.
+Use the full command when you also want the identity / inbox / E2EE dashboard.
+Both commands are safe immediately after installation and again after later
+upgrades.
 
 ## Upgrading
 
