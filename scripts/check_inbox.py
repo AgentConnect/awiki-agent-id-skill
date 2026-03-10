@@ -1,4 +1,4 @@
-"""Check inbox, view chat history, mark messages as read.
+"""Check inbox, view private/group history, and mark messages as read.
 
 Usage:
     # View inbox
@@ -10,15 +10,24 @@ Usage:
     # View chat history with a specific DID
     uv run python scripts/check_inbox.py --history "did:wba:localhost:user:abc123"
 
+    # View only group messages from the mixed inbox feed
+    uv run python scripts/check_inbox.py --scope group
+
+    # View one group's message history directly
+    uv run python scripts/check_inbox.py --group-id grp_123 --limit 50
+
     # Mark messages as read
     uv run python scripts/check_inbox.py --mark-read msg_id_1 msg_id_2
 
 [INPUT]: SDK (RPC calls), credential_store (load identity credentials), local_store,
-         E2EE runtime helpers, outbox tracking, logging_config
-[OUTPUT]: Inbox message list / chat history / mark-read result, with immediate
-          private E2EE protocol processing, plaintext decryption when possible,
-          and best-effort local group snapshot persistence for group messages
-[POS]: Message receiving and processing script
+         E2EE runtime helpers, group RPC history reads, outbox tracking,
+         logging_config
+[OUTPUT]: Inbox message list / private-or-group history / mark-read result,
+          with immediate private E2EE protocol processing, plaintext decryption
+          when possible, local group snapshot persistence, and automatic local
+          incremental cursors for group history reads
+[POS]: Unified message receiving and history script for private chats and
+       discovery-group reads
 
 [PROTOCOL]:
 1. Update this header when logic changes
@@ -36,6 +45,7 @@ from utils import (
     SDKConfig,
     E2eeClient,
     create_molt_message_client,
+    create_user_service_client,
     authenticated_rpc_call,
     resolve_to_did,
 )
@@ -49,15 +59,18 @@ from utils.e2ee import (
     build_e2ee_error_message,
 )
 import local_store
+from manage_group import _persist_group_messages
 
 logger = logging.getLogger(__name__)
 
 
 MESSAGE_RPC = "/message/rpc"
+GROUP_RPC = "/group/rpc"
 _E2EE_MSG_TYPES = {"e2ee_init", "e2ee_ack", "e2ee_msg", "e2ee_rekey", "e2ee_error"}
 _E2EE_SESSION_SETUP_TYPES = {"e2ee_init", "e2ee_rekey"}
 _E2EE_TYPE_ORDER = {"e2ee_init": 0, "e2ee_ack": 1, "e2ee_rekey": 2, "e2ee_msg": 3, "e2ee_error": 4}
 _E2EE_USER_NOTICE = "This is an encrypted message."
+_MESSAGE_SCOPES = {"all", "direct", "group"}
 
 
 def _message_time_value(message: dict[str, Any]) -> str:
@@ -68,7 +81,8 @@ def _message_time_value(message: dict[str, Any]) -> str:
 
 def _message_sort_key(message: dict[str, Any]) -> tuple[Any, ...]:
     """Build a stable E2EE inbox ordering key with server_seq priority inside a sender stream."""
-    sender_did = message.get("sender_did", "")
+    sender_did_raw = message.get("sender_did")
+    sender_did = sender_did_raw if isinstance(sender_did_raw, str) else ""
     server_seq = message.get("server_seq")
     has_server_seq = 0 if isinstance(server_seq, int) else 1
     server_seq_value = server_seq if isinstance(server_seq, int) else 0
@@ -102,6 +116,67 @@ def _strip_hidden_user_fields(message: dict[str, Any]) -> dict[str, Any]:
     rendered = dict(message)
     rendered.pop("title", None)
     return rendered
+
+
+def _filter_messages_by_scope(
+    messages: list[dict[str, Any]],
+    scope: str,
+) -> list[dict[str, Any]]:
+    """Filter mixed inbox messages by the requested scope."""
+    if scope not in _MESSAGE_SCOPES or scope == "all":
+        return messages
+    if scope == "group":
+        return [msg for msg in messages if msg.get("group_id")]
+    return [msg for msg in messages if not msg.get("group_id")]
+
+
+def _parse_group_history_target(target: str) -> str | None:
+    """Parse a group-prefixed history target into a group ID."""
+    prefix = "group:"
+    if not isinstance(target, str) or not target.startswith(prefix):
+        return None
+    group_id = target[len(prefix):].strip()
+    return group_id or None
+
+
+def _resolve_group_since_seq(
+    *,
+    owner_did: str,
+    group_id: str,
+    explicit_since_seq: int | None,
+) -> tuple[int | None, str]:
+    """Resolve the incremental cursor for one group history read."""
+    if explicit_since_seq is not None:
+        return explicit_since_seq, "argument"
+
+    conn = local_store.get_connection()
+    try:
+        local_store.ensure_schema(conn)
+        group_row = conn.execute(
+            """
+            SELECT last_synced_seq
+            FROM groups
+            WHERE owner_did = ? AND group_id = ?
+            """,
+            (owner_did, group_id),
+        ).fetchone()
+        if group_row is not None and isinstance(group_row["last_synced_seq"], int):
+            return group_row["last_synced_seq"], "group_snapshot"
+
+        message_row = conn.execute(
+            """
+            SELECT MAX(server_seq) AS max_server_seq
+            FROM messages
+            WHERE owner_did = ? AND group_id = ? AND server_seq IS NOT NULL
+            """,
+            (owner_did, group_id),
+        ).fetchone()
+        max_server_seq = message_row["max_server_seq"] if message_row is not None else None
+        if isinstance(max_server_seq, int):
+            return max_server_seq, "message_cache"
+        return None, "none"
+    finally:
+        conn.close()
 
 
 def _load_or_create_e2ee_client(local_did: str, credential_name: str) -> E2eeClient:
@@ -141,6 +216,25 @@ async def _send_msg(http_client, sender_did, receiver_did, msg_type, content, *,
         auth=auth,
         credential_name=credential_name,
     )
+
+
+async def _group_rpc_call(
+    *,
+    credential_name: str,
+    method: str,
+    params: dict[str, Any],
+    auth: Any,
+) -> dict[str, Any]:
+    """Run one authenticated discovery-group RPC call."""
+    async with create_user_service_client(SDKConfig()) as client:
+        return await authenticated_rpc_call(
+            client,
+            GROUP_RPC,
+            method,
+            params,
+            auth=auth,
+            credential_name=credential_name,
+        )
 
 
 def _classify_decrypt_error(exc: BaseException) -> tuple[str, str]:
@@ -283,7 +377,11 @@ def _render_local_outgoing_e2ee_message(
     )
 
 
-async def check_inbox(credential_name: str = "default", limit: int = 20) -> None:
+async def check_inbox(
+    credential_name: str = "default",
+    limit: int = 20,
+    scope: str = "all",
+) -> None:
     """View inbox and immediately process private E2EE messages when possible."""
     config = SDKConfig()
     auth_result = create_authenticator(credential_name, config)
@@ -313,8 +411,10 @@ async def check_inbox(credential_name: str = "default", limit: int = 20) -> None
             auth=auth,
             credential_name=credential_name,
         )
+        rendered_messages = _filter_messages_by_scope(rendered_messages, scope)
         inbox["messages"] = rendered_messages
         inbox["total"] = len(rendered_messages)
+        inbox["scope"] = scope
 
         if processed_ids:
             await authenticated_rpc_call(
@@ -371,6 +471,52 @@ async def get_history(
         history["total"] = len(rendered_messages)
 
         print(json.dumps(history, indent=2, ensure_ascii=False))
+
+
+async def get_group_history(
+    group_id: str,
+    credential_name: str = "default",
+    limit: int = 50,
+    since_seq: int | None = None,
+) -> None:
+    """View one discovery group's message history."""
+    config = SDKConfig()
+    auth_result = create_authenticator(credential_name, config)
+    if auth_result is None:
+        print(f"Credential '{credential_name}' unavailable; please create an identity first")
+        sys.exit(1)
+
+    auth, data = auth_result
+    resolved_since_seq, cursor_source = _resolve_group_since_seq(
+        owner_did=str(data["did"]),
+        group_id=group_id,
+        explicit_since_seq=since_seq,
+    )
+    params: dict[str, Any] = {"group_id": group_id, "limit": limit}
+    if resolved_since_seq is not None:
+        params["since_seq"] = resolved_since_seq
+
+    history = await _group_rpc_call(
+        credential_name=credential_name,
+        method="list_messages",
+        params=params,
+        auth=auth,
+    )
+    _persist_group_messages(
+        credential_name=credential_name,
+        identity_data=data,
+        group_id=group_id,
+        payload=history,
+    )
+    history["messages"] = [
+        _strip_hidden_user_fields(message)
+        for message in history.get("messages", [])
+    ]
+    history["total"] = len(history.get("messages", []))
+    history["group_id"] = group_id
+    history["since_seq"] = resolved_since_seq
+    history["cursor_source"] = cursor_source
+    print(json.dumps(history, indent=2, ensure_ascii=False))
 
 
 async def mark_read(
@@ -558,23 +704,74 @@ def main() -> None:
     logger.info("check_inbox CLI started")
 
     parser = argparse.ArgumentParser(description="Check inbox and manage messages")
-    parser.add_argument("--history", type=str, help="View chat history with a specific DID or handle")
-    parser.add_argument("--mark-read", nargs="+", type=str,
-                        help="Mark specified message IDs as read")
-    parser.add_argument("--limit", type=int, default=20,
-                        help="Result count limit (default: 20)")
-    parser.add_argument("--credential", type=str, default="default",
-                        help="Credential name (default: default)")
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument(
+        "--history",
+        type=str,
+        help="View chat history with a specific DID/handle, or group:GROUP_ID",
+    )
+    action.add_argument("--group-id", type=str, help="View one group's message history")
+    action.add_argument(
+        "--mark-read",
+        nargs="+",
+        type=str,
+        help="Mark specified message IDs as read",
+    )
+    parser.add_argument(
+        "--scope",
+        choices=sorted(_MESSAGE_SCOPES),
+        default="all",
+        help="Inbox scope filter: all, direct, or group",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=20,
+        help="Result count limit (default: 20)",
+    )
+    parser.add_argument(
+        "--since-seq",
+        type=int,
+        help="Incremental cursor for group history reads",
+    )
+    parser.add_argument(
+        "--credential", type=str, default="default",
+        help="Credential name (default: default)",
+    )
 
     args = parser.parse_args()
 
     if args.mark_read:
+        if args.since_seq is not None:
+            parser.error("--since-seq only supports group history reads")
         asyncio.run(mark_read(args.mark_read, args.credential))
+    elif args.group_id:
+        asyncio.run(
+            get_group_history(
+                args.group_id,
+                args.credential,
+                args.limit,
+                args.since_seq,
+            )
+        )
     elif args.history:
-        peer_did = asyncio.run(resolve_to_did(args.history))
-        asyncio.run(get_history(peer_did, args.credential, args.limit))
+        group_id = _parse_group_history_target(args.history)
+        if group_id is not None:
+            asyncio.run(
+                get_group_history(
+                    group_id,
+                    args.credential,
+                    args.limit,
+                    args.since_seq,
+                )
+            )
+        else:
+            if args.since_seq is not None:
+                parser.error("--since-seq only supports group history reads")
+            peer_did = asyncio.run(resolve_to_did(args.history))
+            asyncio.run(get_history(peer_did, args.credential, args.limit))
     else:
-        asyncio.run(check_inbox(args.credential, args.limit))
+        if args.since_seq is not None:
+            parser.error("--since-seq only supports group history reads")
+        asyncio.run(check_inbox(args.credential, args.limit, args.scope))
 
 
 if __name__ == "__main__":

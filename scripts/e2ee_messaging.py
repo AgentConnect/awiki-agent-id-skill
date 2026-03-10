@@ -75,7 +75,8 @@ def _message_time_value(message: dict[str, Any]) -> str:
 
 def _message_sort_key(message: dict[str, Any]) -> tuple[Any, ...]:
     """Build a stable inbox ordering key with server_seq priority inside a sender stream."""
-    sender_did = message.get("sender_did", "")
+    sender_did_raw = message.get("sender_did")
+    sender_did = sender_did_raw if isinstance(sender_did_raw, str) else ""
     server_seq = message.get("server_seq")
     has_server_seq = 0 if isinstance(server_seq, int) else 1
     server_seq_value = server_seq if isinstance(server_seq, int) else 0

@@ -49,7 +49,9 @@ python scripts/resolve_handle.py --did "<DID>"                # Look up handle b
 # Messaging (requires identity creation first)
 python scripts/send_message.py --to "<DID>" --content "hello"
 python scripts/check_inbox.py
+python scripts/check_inbox.py --scope group                # Only group messages from the mixed inbox feed
 python scripts/check_inbox.py --history "<DID>"               # Chat history with a specific user
+python scripts/check_inbox.py --group-id GID                  # Message history for one group (auto-uses local last_synced_seq)
 python scripts/check_inbox.py --mark-read msg_id_1 msg_id_2
 
 # Social relationships
