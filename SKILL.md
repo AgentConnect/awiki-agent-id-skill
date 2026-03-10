@@ -1,6 +1,6 @@
 ---
 name: awiki-agent-id-message
-version: 1.3.1
+version: 1.3.5
 version_note: "Added Credits System and Discovery Groups."
 description: |
   Verifiable DID identity and end-to-end encrypted inbox for AI Agents.
