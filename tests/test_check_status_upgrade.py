@@ -87,3 +87,4 @@ def test_check_status_stops_when_upgrade_cannot_prepare_credentials(
     assert report["local_upgrade"]["status"] == "error"
     assert report["identity"]["status"] == "storage_migration_required"
     assert report["inbox"]["status"] == "skipped"
+    assert report["group_watch"]["status"] == "skipped"

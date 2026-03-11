@@ -774,7 +774,6 @@ def _build_parser() -> argparse.ArgumentParser:
     action.add_argument(
         "--fetch-doc", action="store_true", help="Fetch the public group markdown"
     )
-    action.add_argument("--invite", action="store_true", help=argparse.SUPPRESS)
 
     parser.add_argument(
         "--name", "--group-name", dest="name", type=str, help="Group name"
@@ -812,7 +811,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "--credential", type=str, default="default", help="Credential name"
     )
 
-    parser.add_argument("--invite-id", type=str, help=argparse.SUPPRESS)
     parser.add_argument("--public", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--max-members", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--handle", type=str, help=argparse.SUPPRESS)
@@ -823,10 +821,6 @@ def _reject_legacy_args(
     args: argparse.Namespace, parser: argparse.ArgumentParser
 ) -> None:
     """Reject deprecated invitation-era CLI arguments."""
-    if args.invite:
-        parser.error("Invitation-based groups are no longer supported")
-    if args.invite_id:
-        parser.error(_JOIN_GUIDANCE)
     if args.public:
         parser.error(
             "Discovery groups do not support --public; use --join-enabled true|false"

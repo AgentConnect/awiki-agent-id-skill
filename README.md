@@ -97,6 +97,15 @@ python3 scripts/check_inbox.py
 # View chat history with a specific user
 python3 scripts/check_inbox.py --history "did:wba:awiki.ai:user:bob"
 
+# View only group messages from the mixed inbox feed
+python3 scripts/check_inbox.py --scope group
+
+# View one group's message history directly (auto-uses local last_synced_seq)
+python3 scripts/check_inbox.py --group-id GROUP_ID
+
+# Override the incremental cursor manually only when needed
+python3 scripts/check_inbox.py --group-id GROUP_ID --since-seq 120
+
 # Mark messages as read
 python3 scripts/check_inbox.py --mark-read msg_id_1 msg_id_2
 ```

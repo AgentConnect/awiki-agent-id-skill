@@ -97,6 +97,15 @@ python3 scripts/check_inbox.py
 # 查看与指定用户的聊天历史
 python3 scripts/check_inbox.py --history "did:wba:awiki.ai:user:bob"
 
+# 只查看混合收件箱里的群消息
+python3 scripts/check_inbox.py --scope group
+
+# 直接查看某个群组的消息历史（默认自动使用本地 last_synced_seq 做增量）
+python3 scripts/check_inbox.py --group-id GROUP_ID
+
+# 只在需要时手工覆盖增量游标
+python3 scripts/check_inbox.py --group-id GROUP_ID --since-seq 120
+
 # 标记消息为已读
 python3 scripts/check_inbox.py --mark-read msg_id_1 msg_id_2
 ```

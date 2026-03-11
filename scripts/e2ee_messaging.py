@@ -67,9 +67,22 @@ _E2EE_USER_NOTICE = "This is an encrypted message."
 _E2EE_TYPE_ORDER = {"e2ee_init": 0, "e2ee_ack": 1, "e2ee_rekey": 2, "e2ee_msg": 3, "e2ee_error": 4}
 
 
+def _message_time_value(message: dict[str, Any]) -> str:
+    """Return a sortable timestamp string for one message."""
+    timestamp = message.get("sent_at") or message.get("created_at")
+    return timestamp if isinstance(timestamp, str) else ""
+
+
+def _sender_did_value(message: dict[str, Any], fallback: str = "?") -> str:
+    """Return a safe sender DID string for logging and user-facing output."""
+    sender_did = message.get("sender_did")
+    return sender_did if isinstance(sender_did, str) and sender_did else fallback
+
+
 def _message_sort_key(message: dict[str, Any]) -> tuple[Any, ...]:
     """Build a stable inbox ordering key with server_seq priority inside a sender stream."""
-    sender_did = message.get("sender_did", "")
+    sender_did_raw = message.get("sender_did")
+    sender_did = sender_did_raw if isinstance(sender_did_raw, str) else ""
     server_seq = message.get("server_seq")
     has_server_seq = 0 if isinstance(server_seq, int) else 1
     server_seq_value = server_seq if isinstance(server_seq, int) else 0
@@ -77,7 +90,7 @@ def _message_sort_key(message: dict[str, Any]) -> tuple[Any, ...]:
         sender_did,
         has_server_seq,
         server_seq_value,
-        message.get("created_at", ""),
+        _message_time_value(message),
         _E2EE_TYPE_ORDER.get(message.get("type"), 99),
     )
 
@@ -329,7 +342,7 @@ async def process_inbox(
 
         for msg in messages:
             msg_type = msg["type"]
-            sender_did = msg.get("sender_did", "?")
+            sender_did = _sender_did_value(msg)
             processed_ok = False
 
             if msg_type in _E2EE_MSG_TYPES:

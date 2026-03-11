@@ -1,4 +1,4 @@
-"""Unified status check: local upgrade + identity verification + inbox summary.
+"""Unified status check: local upgrade + identity verification + inbox/group summary.
 
 Usage:
     python scripts/check_status.py                     # Status check with E2EE auto-processing
@@ -7,12 +7,14 @@ Usage:
     python scripts/check_status.py --upgrade-only       # Run local upgrade and exit
 
 [INPUT]: SDK (RPC calls, E2eeClient), credential_store (authenticator factory),
-         e2ee_store, credential_migration, database_migration, logging_config
+         e2ee_store, credential_migration, database_migration, local_store,
+         logging_config
 [OUTPUT]: Structured JSON status report (local upgrade + identity + inbox +
-          e2ee_auto + e2ee_sessions), with inbox refreshed after optional
-          auto-processing
+          group_watch + e2ee_auto + e2ee_sessions), with inbox refreshed
+          after optional auto-processing
 [POS]: Unified status check entry point for Agent session startup and heartbeat calls
-       with default-on, server_seq-aware E2EE auto-processing (HPKE E2EE scheme)
+       with default-on, server_seq-aware E2EE auto-processing and local
+       discovery-group watch summaries
 
 [PROTOCOL]:
 1. Update this header when logic changes
@@ -34,6 +36,7 @@ from utils import (
     authenticated_rpc_call,
 )
 from utils.logging_config import configure_logging
+import local_store
 from credential_migration import ensure_credential_storage_ready
 from database_migration import ensure_local_database_ready
 from credential_store import load_identity, create_authenticator
@@ -56,6 +59,12 @@ _E2EE_TYPE_ORDER = {
     "e2ee_msg": 3,
     "e2ee_error": 4,
 }
+
+
+def _message_time_value(message: dict[str, Any]) -> str:
+    """Return a sortable timestamp string for one message."""
+    timestamp = message.get("sent_at") or message.get("created_at")
+    return timestamp if isinstance(timestamp, str) else ""
 
 
 def ensure_local_upgrade_ready(credential_name: str = "default") -> dict[str, Any]:
@@ -89,7 +98,8 @@ def ensure_local_upgrade_ready(credential_name: str = "default") -> dict[str, An
 
 def _message_sort_key(message: dict[str, Any]) -> tuple[Any, ...]:
     """Build a stable E2EE inbox ordering key with server_seq priority inside a sender stream."""
-    sender_did = message.get("sender_did", "")
+    sender_did_raw = message.get("sender_did")
+    sender_did = sender_did_raw if isinstance(sender_did_raw, str) else ""
     server_seq = message.get("server_seq")
     has_server_seq = 0 if isinstance(server_seq, int) else 1
     server_seq_value = server_seq if isinstance(server_seq, int) else 0
@@ -97,7 +107,7 @@ def _message_sort_key(message: dict[str, Any]) -> tuple[Any, ...]:
         sender_did,
         has_server_seq,
         server_seq_value,
-        message.get("created_at", ""),
+        _message_time_value(message),
         _E2EE_TYPE_ORDER.get(message.get("type"), 99),
     )
 
@@ -105,6 +115,148 @@ def _message_sort_key(message: dict[str, Any]) -> tuple[Any, ...]:
 def _is_user_visible_message_type(msg_type: str) -> bool:
     """Return whether a message type should be exposed to end users."""
     return msg_type not in _E2EE_MSG_TYPES
+
+
+def summarize_group_watch(owner_did: str | None) -> dict[str, Any]:
+    """Summarize locally tracked discovery groups for heartbeat decisions."""
+    if not owner_did:
+        return {"status": "no_identity", "active_groups": 0, "groups": []}
+
+    try:
+        conn = local_store.get_connection()
+        try:
+            local_store.ensure_schema(conn)
+            group_rows = conn.execute(
+                """
+                SELECT
+                    group_id,
+                    name,
+                    slug,
+                    my_role,
+                    member_count,
+                    group_owner_did,
+                    group_owner_handle,
+                    last_synced_seq,
+                    last_read_seq,
+                    last_message_at,
+                    stored_at
+                FROM groups
+                WHERE owner_did = ? AND membership_status = 'active'
+                ORDER BY COALESCE(last_message_at, stored_at) DESC, stored_at DESC
+                LIMIT 20
+                """,
+                (owner_did,),
+            ).fetchall()
+
+            groups: list[dict[str, Any]] = []
+            groups_with_pending_recommendations = 0
+            for row in group_rows:
+                group_id = row["group_id"]
+                tracked_members_row = conn.execute(
+                    """
+                    SELECT
+                        COUNT(*) AS cnt,
+                        MAX(joined_at) AS latest_joined_at
+                    FROM group_members
+                    WHERE owner_did = ? AND group_id = ? AND status = 'active'
+                    """,
+                    (owner_did, group_id),
+                ).fetchone()
+                owner_message_row = conn.execute(
+                    """
+                    SELECT
+                        COUNT(*) AS cnt,
+                        MAX(sent_at) AS latest_sent_at
+                    FROM messages
+                    WHERE owner_did = ?
+                      AND group_id = ?
+                      AND content_type = 'group_user'
+                      AND sender_did = COALESCE(?, '')
+                    """,
+                    (owner_did, group_id, row["group_owner_did"]),
+                ).fetchone()
+                local_user_message_row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS cnt
+                    FROM messages
+                    WHERE owner_did = ? AND group_id = ? AND content_type = 'group_user'
+                    """,
+                    (owner_did, group_id),
+                ).fetchone()
+                recommendation_row = conn.execute(
+                    """
+                    SELECT
+                        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
+                        MAX(created_at) AS last_recommended_at
+                    FROM relationship_events
+                    WHERE owner_did = ?
+                      AND source_group_id = ?
+                      AND event_type = 'ai_recommended'
+                    """,
+                    (owner_did, group_id),
+                ).fetchone()
+                saved_contact_row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS cnt
+                    FROM contacts
+                    WHERE owner_did = ? AND source_group_id = ?
+                    """,
+                    (owner_did, group_id),
+                ).fetchone()
+
+                pending_recommendations = int(
+                    recommendation_row["pending_count"] or 0
+                )
+                if pending_recommendations > 0:
+                    groups_with_pending_recommendations += 1
+
+                local_group_user_messages = int(local_user_message_row["cnt"] or 0)
+                tracked_active_members = int(tracked_members_row["cnt"] or 0)
+                groups.append(
+                    {
+                        "group_id": group_id,
+                        "name": row["name"],
+                        "slug": row["slug"],
+                        "my_role": row["my_role"],
+                        "member_count": row["member_count"],
+                        "tracked_active_members": tracked_active_members,
+                        "group_owner_did": row["group_owner_did"],
+                        "group_owner_handle": row["group_owner_handle"],
+                        "local_group_user_messages": local_group_user_messages,
+                        "local_owner_messages": int(owner_message_row["cnt"] or 0),
+                        "latest_owner_message_at": owner_message_row["latest_sent_at"],
+                        "latest_member_joined_at": tracked_members_row["latest_joined_at"],
+                        "pending_recommendations": pending_recommendations,
+                        "last_recommended_at": recommendation_row["last_recommended_at"],
+                        "saved_contacts": int(saved_contact_row["cnt"] or 0),
+                        "recommendation_signal_ready": (
+                            tracked_active_members >= 5
+                            or local_group_user_messages >= 5
+                        ),
+                        "last_synced_seq": row["last_synced_seq"],
+                        "last_read_seq": row["last_read_seq"],
+                        "last_message_at": row["last_message_at"],
+                        "stored_at": row["stored_at"],
+                    }
+                )
+
+            return {
+                "status": "ok",
+                "active_groups": len(groups),
+                "groups_with_pending_recommendations": (
+                    groups_with_pending_recommendations
+                ),
+                "groups": groups,
+            }
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "status": "error",
+            "active_groups": 0,
+            "groups": [],
+            "error": str(exc),
+        }
 
 
 # ---------- E2EE helpers ----------
@@ -404,6 +556,7 @@ async def check_status(
             "error": "Credential storage migration failed or is incomplete",
         }
         report["inbox"] = {"status": "skipped", "total": 0}
+        report["group_watch"] = {"status": "skipped", "active_groups": 0, "groups": []}
         report["e2ee_sessions"] = {"active": 0}
         return report
 
@@ -416,6 +569,7 @@ async def check_status(
             "error": "Local database migration failed",
         }
         report["inbox"] = {"status": "skipped", "total": 0}
+        report["group_watch"] = {"status": "skipped", "active_groups": 0, "groups": []}
         report["e2ee_sessions"] = {"active": 0}
         return report
 
@@ -425,19 +579,23 @@ async def check_status(
     # Return early if identity does not exist
     if report["identity"]["status"] == "no_identity":
         report["inbox"] = {"status": "skipped", "total": 0}
+        report["group_watch"] = {"status": "no_identity", "active_groups": 0, "groups": []}
         report["e2ee_sessions"] = {"active": 0}
         return report
 
-    # 2. Inbox summary
+    # 2. Local discovery-group watch summary
+    report["group_watch"] = summarize_group_watch(report["identity"].get("did"))
+
+    # 3. Inbox summary
     report["inbox"] = await summarize_inbox(credential_name)
 
-    # 3. E2EE auto-processing (optional)
+    # 4. E2EE auto-processing (optional)
     if auto_e2ee:
         report["e2ee_auto"] = await auto_process_e2ee(credential_name)
         # Refresh inbox so the report reflects the post-processing state.
         report["inbox"] = await summarize_inbox(credential_name)
 
-    # 4. E2EE session status
+    # 5. E2EE session status
     e2ee_state = load_e2ee_state(credential_name)
     if e2ee_state is not None:
         sessions = e2ee_state.get("sessions", [])
