@@ -53,7 +53,7 @@ class TestSearchUsersParams:
             await search_users.search_users("alice", "default")
 
         assert captured_params["endpoint"] == "/search/rpc"
-        assert captured_params["method"] == "search"
+        assert captured_params["method"] == "search.users"
         assert captured_params["params"] == {"type": "keyword", "q": "alice"}
 
     def test_missing_credential_exits(self) -> None:

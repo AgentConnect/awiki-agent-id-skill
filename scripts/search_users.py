@@ -44,7 +44,7 @@ async def search_users(query: str, credential_name: str = "default") -> None:
     auth, _ = auth_result
     async with create_user_service_client(config) as client:
         result = await authenticated_rpc_call(
-            client, SEARCH_RPC, "search",
+            client, SEARCH_RPC, "search.users",
             params={"type": "keyword", "q": query},
             auth=auth, credential_name=credential_name,
         )
