@@ -110,7 +110,8 @@ def main() -> None:
     parser.add_argument("--phone", required=True, type=str,
                         help="Phone number in international format with country code "
                              "(e.g., +8613800138000 for China, +14155552671 for US). "
-                             "China local 11-digit numbers are auto-prefixed with +86.")
+                             "China local 11-digit numbers are auto-prefixed with +86. "
+                             "Non-mainland China numbers MUST include the country code to receive SMS.")
     parser.add_argument("--otp-code", type=str, default=None,
                         help="OTP code (if already obtained; otherwise will send and prompt)")
     parser.add_argument("--invite-code", type=str, default=None,
