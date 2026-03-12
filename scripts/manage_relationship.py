@@ -78,7 +78,7 @@ async def follow(target_did: str, credential_name: str = "default") -> None:
             conn.close()
         except Exception:
             logger.debug("Failed to persist follow relationship locally", exc_info=True)
-        print("Follow succeeded:")
+        print("Follow succeeded:", file=sys.stderr)
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
@@ -118,7 +118,7 @@ async def unfollow(target_did: str, credential_name: str = "default") -> None:
             conn.close()
         except Exception:
             logger.debug("Failed to persist unfollow relationship locally", exc_info=True)
-        print("Unfollow succeeded:")
+        print("Unfollow succeeded:", file=sys.stderr)
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
@@ -137,7 +137,7 @@ async def get_status(target_did: str, credential_name: str = "default") -> None:
             client, RPC_ENDPOINT, "get_status", {"target_did": target_did},
             auth=auth, credential_name=credential_name,
         )
-        print("Relationship status:")
+        print("Relationship status:", file=sys.stderr)
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
@@ -161,7 +161,7 @@ async def get_following(
             {"limit": limit, "offset": offset},
             auth=auth, credential_name=credential_name,
         )
-        print("Following list:")
+        print("Following list:", file=sys.stderr)
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
@@ -185,7 +185,7 @@ async def get_followers(
             {"limit": limit, "offset": offset},
             auth=auth, credential_name=credential_name,
         )
-        print("Followers list:")
+        print("Followers list:", file=sys.stderr)
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
 

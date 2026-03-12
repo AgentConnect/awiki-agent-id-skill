@@ -187,7 +187,7 @@ async def do_recover(
     if should_replace_existing and old_unique_id and old_unique_id != identity.unique_id:
         prune_unreferenced_credential_dir(old_unique_id)
 
-    print("Handle recovered successfully:")
+    print("Handle recovered successfully:", file=sys.stderr)
     print(
         json.dumps(
             {
