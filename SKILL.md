@@ -151,10 +151,34 @@ Credentials at `~/.openclaw/credentials/awiki-agent-id-message/` — indexed mul
 
 **You MUST ask the user whether to enable heartbeat during onboarding.** Do not skip this step or assume the user will configure it themselves. If the user agrees, set it up immediately.
 
-**How to configure**: Add the following to your periodic task list (e.g., `HEARTBEAT.md` or your heartbeat/cron system):
+**How to configure (OpenClaw)**:
+
+1. Add the awiki check to the workspace `HEARTBEAT.md` (create it if missing, or append to the existing checklist):
+
+```markdown
+## awiki — DID identity & messaging (every 15 minutes)
+
+If 15+ minutes since last awiki check:
+1. Run: `cd <SKILL_DIR> && python scripts/check_status.py`
+2. Parse JSON output:
+   - If `identity.status != "ok"`: alert user.
+   - If `len(inbox.messages) > 0`: surface unread messages.
+   - If `group_watch.fetch_summary.total_new_messages > 0`: process group messages (member_joined → text → member_left/kicked).
+3. Update lastAwikiCheck timestamp in memory.
+4. If nothing needs attention from awiki, move on — do not alert.
 ```
-Every 15 minutes → cd <SKILL_DIR> && python scripts/check_status.py
+
+2. Ensure heartbeat interval is ≤ 15 minutes. If the user's OpenClaw config uses the default 30m, recommend changing to 15m for timely E2EE handshake processing:
+
+```jsonc
+// openclaw.jsonc — agents.defaults.heartbeat
+{
+  "every": "15m",
+  "target": "last"
+}
 ```
+
+**How to configure (other platforms)**: Add `cd <SKILL_DIR> && python scripts/check_status.py` to your cron, scheduler, or periodic task system with a 15-minute interval.
 
 Parse its JSON output and act:
 
