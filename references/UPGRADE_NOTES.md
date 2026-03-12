@@ -15,3 +15,19 @@ Recent upgrades in this release line are grouped into core features and optimiza
 - **System-event-aware member sync**: local `group_members` can now be updated from group system-event metadata carried by inbox / WebSocket group notifications, improving local visibility into join / leave / kick changes between manual member refreshes.
 - **Messaging quality-of-life updates**: messages support an optional `title`, failed encrypted sends are tracked in `e2ee_outbox`, and retry/drop actions are available for later repair.
 - **Better operations visibility**: daily rotating data logs and `check_status.py` make upgrades, listener troubleshooting, credential migration, and local database/schema upgrades easier to verify.
+
+## Migration from Legacy `.credentials`
+
+If you are upgrading from an older version that stored credentials under `<SKILL_DIR>/.credentials/`, the legacy fallback is no longer supported. Credentials are now stored exclusively at `~/.openclaw/credentials/awiki-agent-id-message/`.
+
+To migrate:
+
+```bash
+# 1. Delete old skill directory
+rm -rf <OLD_SKILL_DIR>
+# 2. Reinstall (zip archive or git clone — see SKILL.md "Install the Skill")
+# 3. Re-create identity
+cd <SKILL_DIR> && python scripts/setup_identity.py --name "YourName"
+```
+
+After reinstalling, run `check_status.py` once — if legacy flat-file credentials are detected, it will migrate them into the new indexed per-credential directory layout.

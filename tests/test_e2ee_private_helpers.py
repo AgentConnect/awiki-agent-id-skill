@@ -99,6 +99,152 @@ class TestInboxSortKey:
         assert messages[0]["server_seq"] == 8
         assert messages[1]["server_seq"] == 9
 
+    def test_check_inbox_sort_key_tolerates_missing_timestamps(self):
+        messages = [
+            {
+                "sender_did": "did:a",
+                "server_seq": None,
+                "sent_at": None,
+                "created_at": None,
+                "type": "e2ee_msg",
+            },
+            {
+                "sender_did": "did:a",
+                "server_seq": None,
+                "sent_at": "2026-03-07T12:31:00Z",
+                "created_at": None,
+                "type": "e2ee_init",
+            },
+        ]
+
+        messages.sort(key=check_inbox._message_sort_key)
+
+        assert messages[0]["sent_at"] is None
+        assert messages[1]["sent_at"] == "2026-03-07T12:31:00Z"
+
+    def test_check_status_sort_key_tolerates_missing_timestamps(self):
+        messages = [
+            {
+                "sender_did": "did:a",
+                "server_seq": None,
+                "sent_at": None,
+                "created_at": None,
+                "type": "e2ee_msg",
+            },
+            {
+                "sender_did": "did:a",
+                "server_seq": None,
+                "sent_at": None,
+                "created_at": "2026-03-07T12:31:00Z",
+                "type": "e2ee_init",
+            },
+        ]
+
+        messages.sort(key=check_status._message_sort_key)
+
+        assert messages[0]["created_at"] is None
+        assert messages[1]["created_at"] == "2026-03-07T12:31:00Z"
+
+    def test_e2ee_messaging_sort_key_tolerates_missing_timestamps(self):
+        messages = [
+            {
+                "sender_did": "did:a",
+                "server_seq": None,
+                "sent_at": None,
+                "created_at": None,
+                "type": "e2ee_msg",
+            },
+            {
+                "sender_did": "did:a",
+                "server_seq": None,
+                "sent_at": None,
+                "created_at": "2026-03-07T12:31:00Z",
+                "type": "e2ee_init",
+            },
+        ]
+
+        messages.sort(key=e2ee_messaging._message_sort_key)
+
+        assert messages[0]["created_at"] is None
+        assert messages[1]["created_at"] == "2026-03-07T12:31:00Z"
+
+    def test_check_inbox_sort_key_tolerates_missing_sender_did(self):
+        messages = [
+            {
+                "sender_did": None,
+                "server_seq": None,
+                "sent_at": "2026-03-10T12:00:00Z",
+                "created_at": "2026-03-10T12:00:00Z",
+                "type": "group_system_member_joined",
+            },
+            {
+                "sender_did": "did:a",
+                "server_seq": None,
+                "sent_at": "2026-03-10T12:01:00Z",
+                "created_at": "2026-03-10T12:01:00Z",
+                "type": "e2ee_msg",
+            },
+        ]
+
+        messages.sort(key=check_inbox._message_sort_key)
+
+        assert messages[0]["sender_did"] is None
+        assert messages[1]["sender_did"] == "did:a"
+
+    def test_check_status_sort_key_tolerates_missing_sender_did(self):
+        messages = [
+            {
+                "sender_did": None,
+                "server_seq": None,
+                "sent_at": "2026-03-10T12:00:00Z",
+                "created_at": "2026-03-10T12:00:00Z",
+                "type": "group_system_member_joined",
+            },
+            {
+                "sender_did": "did:a",
+                "server_seq": None,
+                "sent_at": "2026-03-10T12:01:00Z",
+                "created_at": "2026-03-10T12:01:00Z",
+                "type": "e2ee_msg",
+            },
+        ]
+
+        messages.sort(key=check_status._message_sort_key)
+
+        assert messages[0]["sender_did"] is None
+        assert messages[1]["sender_did"] == "did:a"
+
+    def test_e2ee_messaging_sort_key_tolerates_missing_sender_did(self):
+        messages = [
+            {
+                "sender_did": None,
+                "server_seq": None,
+                "sent_at": "2026-03-10T12:00:00Z",
+                "created_at": "2026-03-10T12:00:00Z",
+                "type": "group_system_member_joined",
+            },
+            {
+                "sender_did": "did:a",
+                "server_seq": None,
+                "sent_at": "2026-03-10T12:01:00Z",
+                "created_at": "2026-03-10T12:01:00Z",
+                "type": "e2ee_msg",
+            },
+        ]
+
+        messages.sort(key=e2ee_messaging._message_sort_key)
+
+        assert messages[0]["sender_did"] is None
+        assert messages[1]["sender_did"] == "did:a"
+
+    def test_e2ee_messaging_sender_did_value_uses_placeholder_for_none(self):
+        assert (
+            e2ee_messaging._sender_did_value({"sender_did": None}) == "?"
+        )
+        assert (
+            e2ee_messaging._sender_did_value({"sender_did": "did:a"}) == "did:a"
+        )
+
 
 class TestOutgoingHistoryRender:
     """Outgoing encrypted history items should be replaceable with local plaintext."""

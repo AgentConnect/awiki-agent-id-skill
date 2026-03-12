@@ -17,7 +17,8 @@ Usage:
 
 [INPUT]: SDK (identity creation, registration, authentication), credential_store
          (credential persistence + authenticator factory), logging_config
-[OUTPUT]: Create/load/list/delete DID identities
+[OUTPUT]: Create/load/list/delete DID identities with automatic JWT
+          bootstrap/refresh during load
 [POS]: Identity management entry script; must be called before first use
 
 [PROTOCOL]:
@@ -111,7 +112,10 @@ async def load_saved_identity(credential_name: str = "default") -> None:
     data = load_identity(credential_name)
     if data is None:
         print(f"Credential '{credential_name}' not found")
-        print("Create an identity first: uv run python scripts/setup_identity.py --name MyAgent")
+        print(
+            "Create an identity first: uv run python scripts/setup_identity.py "
+            "--name MyAgent"
+        )
         sys.exit(1)
 
     print(f"Loaded credential: {credential_name}")
@@ -120,30 +124,46 @@ async def load_saved_identity(credential_name: str = "default") -> None:
     print(f"  user_id   : {data.get('user_id', 'N/A')}")
     print(f"  Created at: {data.get('created_at', 'N/A')}")
 
-    # Verify whether JWT is still valid
-    if not data.get("jwt_token"):
-        print("\n  No JWT token saved")
-        return
-
     config = SDKConfig()
 
     # Try using DIDWbaAuthHeader for automatic authentication
     auth_result = create_authenticator(credential_name, config)
     if auth_result is not None:
         auth, _ = auth_result
+        old_token = data.get("jwt_token")
         async with create_user_service_client(config) as client:
             try:
                 me = await authenticated_rpc_call(
-                    client, "/user-service/did-auth/rpc", "get_me",
-                    auth=auth, credential_name=credential_name,
+                    client,
+                    "/user-service/did-auth/rpc",
+                    "get_me",
+                    auth=auth,
+                    credential_name=credential_name,
                 )
-                print(f"\n  JWT verification succeeded! Current identity:")
+                refreshed_data = load_identity(credential_name) or {}
+                new_token = refreshed_data.get("jwt_token")
+                if not old_token and new_token:
+                    print("\n  JWT bootstrap succeeded and was saved automatically.")
+                elif old_token and new_token and new_token != old_token:
+                    print("\n  JWT refresh succeeded and was saved automatically.")
+                else:
+                    print("\n  JWT verification succeeded.")
+                print("  Current identity:")
                 print(f"    DID: {me.get('did', 'N/A')}")
                 print(f"    Name: {me.get('name', 'N/A')}")
             except Exception as e:
                 print(f"\n  JWT verification/refresh failed: {e}")
                 print("  You may need to recreate the identity")
     else:
+        if not data.get("jwt_token"):
+            print("\n  No JWT token is saved and DID auth files are missing.")
+            print("  Please recreate the identity to enable automatic authentication:")
+            print(
+                "    uv run python scripts/setup_identity.py --name "
+                f"\"{data.get('name', 'MyAgent')}\" --credential {credential_name}"
+            )
+            return
+
         # Legacy credential without did_document; fall back to direct verification
         async with create_user_service_client(config) as client:
             client.headers["Authorization"] = f"Bearer {data['jwt_token']}"
@@ -153,8 +173,14 @@ async def load_saved_identity(credential_name: str = "default") -> None:
                 print(f"    DID: {me.get('did', 'N/A')}")
                 print(f"    Name: {me.get('name', 'N/A')}")
             except Exception:
-                print("\n  JWT expired. Please recreate the identity to enable auto-refresh:")
-                print(f"    python scripts/setup_identity.py --name \"{data.get('name', 'MyAgent')}\" --credential {credential_name}")
+                print(
+                    "\n  JWT expired. Please recreate the identity to enable "
+                    "auto-refresh:"
+                )
+                print(
+                    "    uv run python scripts/setup_identity.py --name "
+                    f"\"{data.get('name', 'MyAgent')}\" --credential {credential_name}"
+                )
 
 
 def show_identities() -> None:

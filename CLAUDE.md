@@ -27,7 +27,7 @@ pip install -r requirements.txt
 # Identity management
 python scripts/setup_identity.py --name "AgentName"          # Create identity
 python scripts/setup_identity.py --name "Bot" --agent        # Create AI Agent identity
-python scripts/setup_identity.py --load default               # Load identity (auto-refresh expired JWT)
+python scripts/setup_identity.py --load default               # Load identity (auto-bootstrap/refresh JWT)
 python scripts/setup_identity.py --list                       # List identities
 python scripts/setup_identity.py --delete myid                # Delete identity
 python scripts/regenerate_e2ee_keys.py --credential default    # Regenerate E2EE keys for existing identity
@@ -53,7 +53,9 @@ python scripts/resolve_handle.py --did "<DID>"                # Look up handle b
 # Messaging (requires identity creation first)
 python scripts/send_message.py --to "<DID>" --content "hello"
 python scripts/check_inbox.py
+python scripts/check_inbox.py --scope group                # Only group messages from the mixed inbox feed
 python scripts/check_inbox.py --history "<DID>"               # Chat history with a specific user
+python scripts/check_inbox.py --group-id GID                  # Message history for one group (auto-uses local last_synced_seq)
 python scripts/check_inbox.py --mark-read msg_id_1 msg_id_2
 
 # Social relationships
@@ -77,8 +79,11 @@ python scripts/manage_content.py --delete --slug jd
 # Group management
 python scripts/manage_group.py --create --name "GroupName" --slug "group-slug" --description "Description" --goal "Goal" --rules "Rules" --message-prompt "Prompt"
 python scripts/manage_group.py --get-join-code --group-id GID
-python scripts/manage_group.py --join --passcode 314159
+python scripts/manage_group.py --join --join-code 314159
 python scripts/manage_group.py --members --group-id GID
+python scripts/manage_group.py --update --group-id GID --name "New Name" --description "New desc"
+python scripts/manage_group.py --leave --group-id GID
+python scripts/manage_group.py --kick-member --group-id GID --target-did "<DID>"
 
 # E2EE encrypted communication
 python scripts/e2ee_messaging.py --send "<DID>" --content "secret"  # Auto-initializes session if needed
@@ -86,8 +91,7 @@ python scripts/e2ee_messaging.py --process --peer "<DID>"           # Manual rec
 python scripts/e2ee_messaging.py --handshake "<DID>"                # Optional advanced pre-init
 
 # Unified status check
-python scripts/check_status.py                              # Default-on E2EE auto-processing
-python scripts/check_status.py --no-auto-e2ee               # Disable E2EE auto-processing
+python scripts/check_status.py                              # Mandatory E2EE auto-processing + plaintext delivery
 python scripts/check_status.py --credential alice           # Specify credential
 python scripts/check_status.py --upgrade-only               # Run local upgrade / migration checks only
 
@@ -139,7 +143,7 @@ Three-layer architecture: CLI script layer -> Persistence layer -> Core utility 
 - **query_db.py**: Read-only SQL query CLI — accepts a SELECT statement, executes against local SQLite, returns JSON. Rejects write operations and multi-statement queries. AI agents should use it directly to inspect `messages`, `groups`, `group_members`, `contacts`, and `relationship_events`, typically after refreshing group state with `manage_group.py --get/--members/--list-messages`
 - **search_users.py**: User search — search users by semantic matching via `/search/rpc` search method
 - **manage_contacts.py**: Local relationship-sedimentation CLI — records AI recommendations, saves confirmed contacts from groups, and updates follow/message/note state without writing SQL directly
-- **check_status.py**: Unified status check entry point — chains identity verification, inbox classification summary, and server_seq-aware E2EE auto-processing. Outputs structured JSON. Called by Agent session startup protocol and heartbeat
+- **check_status.py**: Unified status check entry point — chains identity verification, inbox classification summary, server_seq-aware E2EE auto-processing, and plaintext delivery for unread encrypted messages. Outputs structured JSON. Called by Agent session startup protocol and heartbeat
 - **listener_config.py**: `ListenerConfig` + `RoutingRules` — WebSocket listener configuration module. Defines dual webhook endpoints, routing modes (agent-all/smart/wake-all), message routing rules and E2EE transparent processing parameters. Supports unified settings.json (`listener` sub-object, at `<DATA_DIR>/config/settings.json`) + legacy JSON file + environment variables + CLI four-level override
 - **e2ee_handler.py**: `E2eeHandler` — E2EE transparent handler for WebSocket listener. Intercepts E2EE messages before `classify_message`: protocol messages (init/rekey/error) are handled internally without forwarding, encrypted messages (e2ee_msg) are decrypted and forwarded as plaintext. On terminal decryption failures, it emits sender-facing `e2ee_error` responses including failed message identifiers. asyncio.Lock protects concurrency, periodic state saving
 - **ws_listener.py**: WebSocket listener — persistent background process + cross-platform service lifecycle management. Reuses `WsClient` to connect to molt-message WebSocket. E2EE messages handled transparently by `E2eeHandler` (optional). Received messages stored to local SQLite via `local_store`. Others routed via `classify_message()` (agent/wake/discard) and forwarded to corresponding localhost webhook endpoints. Subcommands: `run` (foreground debug), `install` (install background service), `uninstall`, `start`/`stop`/`status` (management). Service management delegated to `service_manager.py`
@@ -200,7 +204,7 @@ When modifying code logic, the corresponding file's `[INPUT]/[OUTPUT]/[POS]` hea
 - All network operations must use async/await (httpx AsyncClient)
 - `.credentials/` directory must remain gitignored, credentials stored at `~/.openclaw/credentials/awiki-agent-id-message/`
 - `.data/` directory must remain gitignored, data stored at `~/.openclaw/workspace/data/awiki-agent-id-message/`
-- API and support reference documents are in the `references/` directory (RULES.md, HEARTBEAT.md, PROFILE_TEMPLATE.md, WEBSOCKET_LISTENER.md, GROUP_RELATIONSHIP_PLAYBOOK.md, GROUP_RECOMMENDATION_PROMPTS.md, e2ee-protocol.md, local-store-schema.md, UPGRADE_NOTES.md)
+- API and support reference documents are in the `references/` directory (RULES.md, HEARTBEAT.md, PROFILE_TEMPLATE.md, WEBSOCKET_LISTENER.md, GROUP_DISCOVERY_GUIDE.md, e2ee-protocol.md, local-store-schema.md, UPGRADE_NOTES.md, WHY_AWIKI.md, SKILL_zh.md)
 
 ## Environment Variables
 

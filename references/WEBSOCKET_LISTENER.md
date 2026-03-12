@@ -114,6 +114,11 @@ That's it! The listener is now running as a background service. It will auto-sta
 
 ## Management Commands
 
+**After upgrading the skill**: If the listener is running as a background service, reinstall it to pick up code changes:
+```bash
+cd <SKILL_DIR> && python scripts/ws_listener.py uninstall && python scripts/ws_listener.py install --credential default
+```
+
 ```bash
 # Install and start the service (auto-reads <DATA_DIR>/config/settings.json)
 cd <SKILL_DIR> && python scripts/ws_listener.py install --credential default --mode smart
@@ -211,3 +216,12 @@ Auth header: `Authorization: Bearer <webhook_token>` (must match OpenClaw `hooks
 | 401 from webhook | Verify `webhook_token` matches OpenClaw `hooks.token` |
 | Webhook not receiving | Verify OpenClaw is running: `curl http://127.0.0.1:18789/hooks/wake -H 'Authorization: Bearer TOKEN' -d '{"text":"test"}'` |
 | Want to change mode | Uninstall → reinstall with new `--mode` |
+
+## E2EE Integration with Heartbeat
+
+When using the WebSocket Listener alongside the heartbeat protocol:
+
+- The listener handles E2EE transparently: protocol messages (init/rekey/error) are processed internally, encrypted messages are decrypted and forwarded as plaintext to webhooks
+- `check_status.py` remains the primary heartbeat tool for identity, inbox summary, and JWT refresh
+- If unread encrypted messages remain after auto-processing, use `e2ee_messaging.py --process --peer <DID>` as a recovery path
+- The listener complements the heartbeat — it does not replace `check_status.py`

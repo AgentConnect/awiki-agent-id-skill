@@ -82,8 +82,9 @@ def test_check_status_stops_when_upgrade_cannot_prepare_credentials(
         },
     )
 
-    report = asyncio.run(check_status.check_status("alice", auto_e2ee=False))
+    report = asyncio.run(check_status.check_status("alice"))
 
     assert report["local_upgrade"]["status"] == "error"
     assert report["identity"]["status"] == "storage_migration_required"
     assert report["inbox"]["status"] == "skipped"
+    assert report["group_watch"]["status"] == "skipped"

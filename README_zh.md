@@ -17,7 +17,7 @@
 - **Profile 管理** - 查看和更新 DID Profile（昵称、简介、标签）
 - **消息通信** - 发送消息、查看收件箱、聊天历史、标记已读
 - **社交关系** - 关注/取关、查看粉丝/关注列表、互关好友检测
-- **发现型群组** - 创建低噪音发现型群组、管理入群码、通过全局 6 位数字码入群
+- **发现型群组** - 创建低噪音发现型群组、管理 join-code，并且只能通过全局 6 位数字 join-code 入群
 - **E2EE 加密通信** - 端到端加密消息收发，自动密钥交换握手
 
 ## 快速开始
@@ -97,6 +97,15 @@ python3 scripts/check_inbox.py
 # 查看与指定用户的聊天历史
 python3 scripts/check_inbox.py --history "did:wba:awiki.ai:user:bob"
 
+# 只查看混合收件箱里的群消息
+python3 scripts/check_inbox.py --scope group
+
+# 直接查看某个群组的消息历史（默认自动使用本地 last_synced_seq 做增量）
+python3 scripts/check_inbox.py --group-id GROUP_ID
+
+# 只在需要时手工覆盖增量游标
+python3 scripts/check_inbox.py --group-id GROUP_ID --since-seq 120
+
 # 标记消息为已读
 python3 scripts/check_inbox.py --mark-read msg_id_1 msg_id_2
 ```
@@ -136,8 +145,8 @@ python3 scripts/e2ee_messaging.py --handshake "did:wba:awiki.ai:user:bob"
 ```
 
 E2EE 会话状态会自动持久化，可跨会话复用。
-`check_inbox.py`、`check_status.py` 和 WebSocket 监听器都可以自动处理 E2EE
-协议消息，因此手动 `--process` 主要用于恢复或调试。
+`check_inbox.py` 和 `check_status.py` 会在可能时自动处理 E2EE 协议消息并返回解密后的明文；
+WebSocket 监听器也会在转发前完成解密。因此手动 `--process` 主要用于恢复或调试。
 
 ### 发现型群组
 
@@ -151,12 +160,12 @@ python3 scripts/manage_group.py --create \
   --rules "不要刷屏，不要发广告。" \
   --message-prompt "请在 500 字内介绍你是谁、你在做什么、你想认识什么人。"
 
-# 获取或刷新当前入群码（仅群主）
+# 获取或刷新当前 join-code（仅群主）
 python3 scripts/manage_group.py --get-join-code --group-id GROUP_ID
 python3 scripts/manage_group.py --refresh-join-code --group-id GROUP_ID
 
-# 使用全局 6 位数字入群码加入
-python3 scripts/manage_group.py --join --passcode 314159
+# 目前加入群组的唯一方式，就是使用全局 6 位数字 join-code
+python3 scripts/manage_group.py --join --join-code 314159
 
 # 入群后先刷新本地快照
 python3 scripts/manage_group.py --get --group-id GROUP_ID

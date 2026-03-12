@@ -27,6 +27,11 @@ from utils.auth import get_jwt_via_wba
 HANDLE_RPC = "/user-service/handle/rpc"
 DID_AUTH_RPC = "/user-service/did-auth/rpc"
 
+
+def _sanitize_otp(code: str) -> str:
+    """Strip all whitespace (spaces, newlines, tabs) from an OTP code."""
+    return re.sub(r"\s+", "", code)
+
 # International phone format: +{country_code}{number}
 _PHONE_INTL_RE = re.compile(r"^\+\d{1,3}\d{6,14}$")
 # China local format: 11 digits starting with 1
@@ -153,7 +158,7 @@ async def register_handle(
         "did_document": identity.did_document,
         "handle": handle,
         "phone": normalized,
-        "otp_code": otp_code,
+        "otp_code": _sanitize_otp(otp_code),
     }
     if invite_code is not None:
         payload["invite_code"] = invite_code
@@ -198,7 +203,7 @@ async def recover_handle(
         "did_document": identity.did_document,
         "handle": handle,
         "phone": normalized,
-        "otp_code": otp_code,
+        "otp_code": _sanitize_otp(otp_code),
     }
     recover_result = await rpc_call(client, DID_AUTH_RPC, "recover_handle", payload)
 

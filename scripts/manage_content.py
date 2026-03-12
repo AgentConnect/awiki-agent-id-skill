@@ -33,7 +33,7 @@ Usage:
 
 [INPUT]: SDK (authenticated_rpc_call), credential_store (load identity credentials),
          logging_config
-[OUTPUT]: Content page CRUD operations results
+[OUTPUT]: Content page CRUD operations results with structured JSON errors
 [POS]: Content Pages management script
 
 [PROTOCOL]:
@@ -48,7 +48,12 @@ import logging
 import sys
 from pathlib import Path
 
-from utils import SDKConfig, create_user_service_client, authenticated_rpc_call
+from utils import (
+    SDKConfig,
+    JsonRpcError,
+    create_user_service_client,
+    authenticated_rpc_call,
+)
 from utils.logging_config import configure_logging
 from credential_store import create_authenticator
 
@@ -296,49 +301,67 @@ def main() -> None:
             sys.exit(1)
         body = body_path.read_text(encoding="utf-8")
 
-    if args.create:
-        if not args.slug or not args.title:
-            parser.error("--create requires --slug and --title")
-        asyncio.run(create_page(
-            credential_name=args.credential,
-            slug=args.slug,
-            title=args.title,
-            body=body or "",
-            visibility=args.visibility or "public",
-        ))
+    try:
+        if args.create:
+            if not args.slug or not args.title:
+                parser.error("--create requires --slug and --title")
+            asyncio.run(create_page(
+                credential_name=args.credential,
+                slug=args.slug,
+                title=args.title,
+                body=body or "",
+                visibility=args.visibility or "public",
+            ))
 
-    elif args.update:
-        if not args.slug:
-            parser.error("--update requires --slug")
-        asyncio.run(update_page(
-            credential_name=args.credential,
-            slug=args.slug,
-            title=args.title,
-            body=body,
-            visibility=args.visibility,
-        ))
+        elif args.update:
+            if not args.slug:
+                parser.error("--update requires --slug")
+            asyncio.run(update_page(
+                credential_name=args.credential,
+                slug=args.slug,
+                title=args.title,
+                body=body,
+                visibility=args.visibility,
+            ))
 
-    elif args.rename:
-        if not args.slug or not args.new_slug:
-            parser.error("--rename requires --slug and --new-slug")
-        asyncio.run(rename_page(
-            credential_name=args.credential,
-            old_slug=args.slug,
-            new_slug=args.new_slug,
-        ))
+        elif args.rename:
+            if not args.slug or not args.new_slug:
+                parser.error("--rename requires --slug and --new-slug")
+            asyncio.run(rename_page(
+                credential_name=args.credential,
+                old_slug=args.slug,
+                new_slug=args.new_slug,
+            ))
 
-    elif args.delete:
-        if not args.slug:
-            parser.error("--delete requires --slug")
-        asyncio.run(delete_page(args.credential, args.slug))
+        elif args.delete:
+            if not args.slug:
+                parser.error("--delete requires --slug")
+            asyncio.run(delete_page(args.credential, args.slug))
 
-    elif args.list:
-        asyncio.run(list_pages(args.credential))
+        elif args.list:
+            asyncio.run(list_pages(args.credential))
 
-    elif args.get:
-        if not args.slug:
-            parser.error("--get requires --slug")
-        asyncio.run(get_page(args.credential, args.slug))
+        elif args.get:
+            if not args.slug:
+                parser.error("--get requires --slug")
+            asyncio.run(get_page(args.credential, args.slug))
+    except JsonRpcError as exc:
+        print(json.dumps({
+            "status": "error",
+            "error_type": "jsonrpc",
+            "code": exc.code,
+            "message": exc.message,
+            "data": exc.data,
+        }, indent=2, ensure_ascii=False))
+        raise SystemExit(1) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("manage_content CLI failed")
+        print(json.dumps({
+            "status": "error",
+            "error_type": type(exc).__name__,
+            "message": str(exc),
+        }, indent=2, ensure_ascii=False))
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":
