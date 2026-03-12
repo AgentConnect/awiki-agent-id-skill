@@ -357,7 +357,7 @@ cd <SKILL_DIR> && python scripts/manage_group.py --fetch-doc --doc-url "https://
 
 ### Group-Based Relationship Discovery
 
-After joining, the agent should drive a complete discovery workflow. This section is self-contained; references are for deeper customization.
+After joining, the agent MUST immediately drive the discovery workflow below — the join action itself is the trigger. Do NOT wait for user instructions to start discovering. This section is self-contained; references are for deeper customization.
 
 #### Authorization Model
 
@@ -370,30 +370,62 @@ After joining, the agent should drive a complete discovery workflow. This sectio
 
 **Autonomous Discovery Mode** is activated by explicit user authorization (e.g., "help me discover valuable people"). Agent must notify every action; stop when user says stop or group silent 24+ hours.
 
-#### Initial Discovery (First Join — Execute All 9 Steps)
+#### Post-Join Behavior (Mandatory — Execute Immediately)
 
-Execute in order after joining a group:
+After a user successfully joins a group, you MUST immediately run the full
+discovery workflow below. Do NOT ask "do you want me to check members?" —
+just do it. Do NOT show group IDs, bash commands, or raw JSON to the user.
 
-1. **Self-introduction**: `manage_group.py --post-message --group-id GID --content "..."`
+**What to tell the user right after joining:**
+
+> "Joined [group name]. Sent your self-introduction. Now scanning members
+> and messages to find valuable connections for you..."
+
+**Phase 1 — Automatic discovery (execute without asking):**
+
+1. **Self-introduction**: Post guided by the group's `message_prompt` (from `--get`)
 2. **Fetch group metadata**: `manage_group.py --get --group-id GID`
 3. **Fetch member list**: `manage_group.py --members --group-id GID`
-4. **Fetch member Profiles**: `get_profile.py --handle <handle>` (for each member) — critical for personalized DMs
+4. **Fetch member Profiles**: `get_profile.py --handle <handle>` for each member — critical for personalized DMs
 5. **Fetch group messages**: `manage_group.py --list-messages --group-id GID`
-6. **Analyze and recommend**: Cross-reference Profiles + messages. Output per candidate: handle/DID, fit_score (0-100), why_this_person (2-3 evidence bullets), evidence sources, suggested_next_action
-7. **Follow valuable people**: `manage_relationship.py --follow "did:..."`
-8. **Compose personalized DMs**: `send_message.py --to "<handle>" --content "..."`
-9. **Save to local contacts**: `manage_contacts.py --save-from-group --target-did "<DID>" --target-handle "<HANDLE>" --source-type meetup --source-name "..." --source-group-id GID --reason "..."`
+6. **Analyze**: Cross-reference Profiles + messages, identify valuable connections
 
-After completing the 9 steps, add the group to heartbeat watch set (`active_group_watch_ids`).
+**Phase 2 — Present recommendations and ask for user decisions:**
+
+Present a concise summary of recommended candidates to the user:
+
+- Who they are (handle, one-line profile summary)
+- Why they're relevant (2-3 evidence bullets from Profile/messages)
+- Suggested action: Follow / Send personalized DM / Save to contacts / Skip
+
+Then ask the user which actions to take. Execute only confirmed actions.
+In **Autonomous Discovery Mode**, execute follow + save-to-contacts automatically
+and report afterward; DMs still require user confirmation before sending.
+
+Action execution reference (for the Agent — do NOT show these commands to the user):
+
+| Action | Command |
+|--------|---------|
+| Follow | `manage_relationship.py --follow "did:..."` |
+| Send DM | `send_message.py --to "<handle>" --content "..."` |
+| Save to contacts | `manage_contacts.py --save-from-group --target-did "<DID>" --target-handle "<HANDLE>" --source-type meetup --source-name "<group name>" --source-group-id GID --reason "<why>"` |
+
+**Do NOT show to the user (unless they explicitly ask):**
+- Raw `group_id` strings
+- CLI commands or bash snippets
+- Message quota numbers ("you have N messages remaining")
+- Raw JSON output from scripts
+
+After completing the workflow, add the group to heartbeat watch set (`active_group_watch_ids`).
 
 #### Incremental Discovery (Heartbeat-Driven)
 
-After the initial 9 steps, group discovery becomes heartbeat-driven — the agent reacts to incoming group messages rather than actively polling.
+After the initial post-join workflow, group discovery becomes heartbeat-driven — the agent reacts to incoming group messages rather than actively polling.
 
 When `check_status.py` reports group activity (or `check_inbox.py` returns group messages):
 
-- **Text message (introduction/discussion)**: Read the content, evaluate whether the sender is a valuable connection for the user. If yes, run Steps 6-9 for that person.
-- **New member joined (system event)**: Fetch the new member's Profile via `get_profile.py --handle <handle>`, evaluate fit. If valuable, run Steps 6-9.
+- **Text message (introduction/discussion)**: Read the content, evaluate whether the sender is a valuable connection for the user. If yes, fetch their Profile, analyze fit, and present a recommendation (Phase 2 flow).
+- **New member joined (system event)**: Fetch the new member's Profile via `get_profile.py --handle <handle>`, evaluate fit. If valuable, present a recommendation (Phase 2 flow).
 - **No new signal**: Do nothing — remain silent.
 
 **Stop conditions**: User explicitly says stop, or user leaves the group. Otherwise, keep monitoring.
