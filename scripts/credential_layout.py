@@ -152,8 +152,20 @@ def get_index_entry(
     credential_name: str,
     config: SDKConfig | None = None,
 ) -> dict[str, Any] | None:
-    """Return the index entry for a credential name."""
-    return load_index(config)["credentials"].get(credential_name)
+    """Return the index entry for a credential name.
+
+    When callers request the argparse default credential name ``"default"``,
+    first honor a literal ``"default"`` entry if one exists. Otherwise, fall
+    back to the configured ``default_credential_name`` stored in the index so
+    all scripts consistently resolve the user-selected default credential.
+    """
+    index = load_index(config)
+    entry = index["credentials"].get(credential_name)
+    if entry is None and credential_name == "default":
+        fallback_name = index.get("default_credential_name")
+        if fallback_name and fallback_name != "default":
+            entry = index["credentials"].get(fallback_name)
+    return entry
 
 
 def set_index_entry(

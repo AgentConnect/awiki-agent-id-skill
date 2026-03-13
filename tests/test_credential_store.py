@@ -123,6 +123,31 @@ def test_save_identity_without_handle_uses_unique_id_directory(isolated_home) ->
     assert "handle" not in loaded_data
 
 
+def test_default_alias_falls_back_to_configured_default_credential_name(isolated_home) -> None:
+    """The default alias should resolve to the configured index default entry."""
+    did = "did:wba:awiki.ai:cgw:k1_cgw"
+    _save_sample_identity(
+        handle="cgw",
+        name="cgw",
+        did=did,
+        unique_id="k1_cgw",
+    )
+
+    index = credential_layout.load_index()
+    index["default_credential_name"] = "cgw"
+    credential_layout.save_index(index)
+
+    entry = credential_layout.get_index_entry("default")
+    loaded_data = credential_store.load_identity("default")
+
+    assert entry is not None
+    assert entry["credential_name"] == "cgw"
+    assert entry["is_default"] is True
+    assert loaded_data is not None
+    assert loaded_data["did"] == did
+    assert loaded_data["handle"] == "cgw"
+
+
 def test_save_identity_rejects_overwrite_for_different_did(isolated_home) -> None:
     """A credential name should not silently overwrite another DID."""
     _save_sample_identity(name="default", did="did:wba:awiki.ai:user:k1_first", unique_id="k1_first")

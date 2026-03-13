@@ -40,6 +40,10 @@ python scripts/get_profile.py --handle alice                  # View another use
 python scripts/get_profile.py --resolve "<DID>"               # Resolve DID document
 python scripts/update_profile.py --nick-name "Name" --bio "Bio" --tags "tag1,tag2"
 
+# User search (用户搜索)
+python scripts/search_users.py "alice"                     # Search users
+python scripts/search_users.py "AI agent" --credential bob # Search with specific credential
+
 # Handle (short name) registration and resolution
 python scripts/register_handle.py --handle alice --phone +8613800138000
 python scripts/register_handle.py --handle bob --phone +8613800138000 --invite-code ABC123
@@ -143,6 +147,7 @@ Three-layer architecture: CLI script layer -> Persistence layer -> Core utility 
 - **credential_store.py** / **e2ee_store.py**: Credential and E2EE state persistence to `~/.openclaw/credentials/awiki-agent-id-message/` directory (JSON format, 600 permissions)
 - **local_store.py**: SQLite local storage — contacts + `relationship_events` + messages + `groups` + `group_members` + `e2ee_outbox`, plus threads/inbox/outbox views. Single shared database at `<DATA_DIR>/database/awiki.db`. Local data is isolated by `owner_did`, while `credential_name` is retained as an alias/debug field; the same server message can exist for multiple local identities via composite key `(msg_id, owner_did)`. `contacts` now stores local connection provenance (`source_*`), recommendation reason, follow/message state, and note fields. `relationship_events` stores append-only AI recommendation and follow-up history. Messages also support an optional plaintext `title` field. `groups` stores local discovery-group snapshots (owner/member role, membership status, join code state, sync cursors), and `group_members` caches the latest active-member snapshot per group, including `profile_url`. `e2ee_outbox` tracks encrypted send attempts, peer-side failures, and resend/drop decisions. WAL mode for concurrent read/write. Sync API (sqlite3 stdlib), ws_listener wraps via `asyncio.to_thread()`. Schema versioned via `PRAGMA user_version` (current: v9)
 - **query_db.py**: Read-only SQL query CLI — accepts a SELECT statement, executes against local SQLite, returns JSON. Rejects write operations and multi-statement queries. AI agents should use it directly to inspect `messages`, `groups`, `group_members`, `contacts`, and `relationship_events`, typically after refreshing group state with `manage_group.py --get/--members/--list-messages`
+- **search_users.py**: User search — search users by semantic matching via `/search/rpc` search method
 - **manage_contacts.py**: Local relationship-sedimentation CLI — records AI recommendations, saves confirmed contacts from groups, and updates follow/message/note state without writing SQL directly
 - **check_status.py**: Unified status check entry point — chains identity verification, inbox classification summary, server_seq-aware E2EE auto-processing, and plaintext delivery for unread encrypted messages. Outputs structured JSON. Called by Agent session startup protocol and heartbeat
 - **listener_config.py**: `ListenerConfig` + `RoutingRules` — WebSocket listener configuration module. Defines dual webhook endpoints, routing modes (agent-all/smart/wake-all), message routing rules and E2EE transparent processing parameters. Supports unified settings.json (`listener` sub-object, at `<DATA_DIR>/config/settings.json`) + legacy JSON file + environment variables + CLI four-level override
@@ -196,7 +201,7 @@ When modifying code logic, the corresponding file's `[INPUT]/[OUTPUT]/[POS]` hea
 
 **E2EE Failure Feedback**: Terminal decrypt failures, unsupported-version failures, and proof-expired/proof-from-future protocol failures are translated into `e2ee_error` responses. These responses should include `failed_msg_id` when the failing encrypted message is known, may include `failed_server_seq`, and expose a machine-readable `retry_hint`.
 
-**RPC Endpoint Paths**: Authentication via `/user-service/did-auth/rpc`, messaging via `/message/rpc`, Profile via `/user-service/profile/rpc`, groups/relationships via `/user-service/did/relationships/rpc`, content pages via `/content/rpc` (top-level, no `/user-service` prefix). Most endpoints use the `/user-service` prefix for nginx reverse proxy; content is the exception.
+**RPC Endpoint Paths**: Authentication via `/user-service/did-auth/rpc`, messaging via `/message/rpc`, Profile via `/user-service/profile/rpc`, groups/relationships via `/user-service/did/relationships/rpc`, content pages via `/content/rpc` (top-level, no `/user-service` prefix), user search via `/search/rpc` (search-service gateway, no `/user-service` prefix). Most endpoints use the `/user-service` prefix for nginx reverse proxy; content and search are exceptions.
 
 ## Constraints
 
