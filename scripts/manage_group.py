@@ -27,6 +27,7 @@ import argparse
 import asyncio
 import json
 import logging
+import sys
 from typing import Any
 from urllib.parse import urlparse
 
@@ -325,19 +326,28 @@ async def create_group(
     config = SDKConfig()
     identity_data = _get_identity_data_or_exit(credential_name, config)
     logger.info("Creating discovery group credential=%s slug=%s", credential_name, slug)
-    result = await _authenticated_group_call(
-        credential_name,
-        "create",
-        {
-            "name": name,
-            "slug": slug,
-            "description": description,
-            "goal": goal,
-            "rules": rules,
-            "message_prompt": message_prompt,
-            "join_enabled": join_enabled,
-        },
-    )
+    try:
+        result = await _authenticated_group_call(
+            credential_name,
+            "create",
+            {
+                "name": name,
+                "slug": slug,
+                "description": description,
+                "goal": goal,
+                "rules": rules,
+                "message_prompt": message_prompt,
+                "join_enabled": join_enabled,
+            },
+        )
+    except JsonRpcError as exc:
+        if exc.code == -32004:
+            print(
+                f"Slug '{slug}' is already taken. "
+                "Please choose a different slug.",
+                file=sys.stderr,
+            )
+        raise
     _persist_group_snapshot(
         credential_name=credential_name,
         identity_data=identity_data,
@@ -345,7 +355,7 @@ async def create_group(
         my_role="owner",
         membership_status="active",
     )
-    print("Group created successfully:")
+    print("Group created successfully:", file=sys.stderr)
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
@@ -373,7 +383,7 @@ async def get_group(
         group_payload=result,
         membership_status="active",
     )
-    print("Group detail:")
+    print("Group detail:", file=sys.stderr)
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
@@ -412,7 +422,7 @@ async def update_group(
         my_role="owner",
         membership_status="active",
     )
-    print("Group updated successfully:")
+    print("Group updated successfully:", file=sys.stderr)
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
@@ -441,7 +451,7 @@ async def refresh_join_code(
         my_role="owner",
         membership_status="active",
     )
-    print("Join-code refreshed successfully:")
+    print("Join-code refreshed successfully:", file=sys.stderr)
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
@@ -470,7 +480,7 @@ async def get_join_code(
         my_role="owner",
         membership_status="active",
     )
-    print("Current join-code:")
+    print("Current join-code:", file=sys.stderr)
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
@@ -501,7 +511,7 @@ async def set_join_enabled(
         my_role="owner",
         membership_status="active",
     )
-    print("Join switch updated successfully:")
+    print("Join switch updated successfully:", file=sys.stderr)
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
@@ -533,7 +543,7 @@ async def join_group(
         my_role="member",
         membership_status=str(result.get("status") or "active"),
     )
-    print("Joined group successfully:")
+    print("Joined group successfully:", file=sys.stderr)
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
@@ -570,7 +580,7 @@ async def leave_group(
         )
     finally:
         conn.close()
-    print("Left group successfully:")
+    print("Left group successfully:", file=sys.stderr)
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
@@ -607,7 +617,7 @@ async def kick_member(
         )
     finally:
         conn.close()
-    print("Member removed successfully:")
+    print("Member removed successfully:", file=sys.stderr)
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
@@ -635,7 +645,7 @@ async def get_group_members(
         group_id=group_id,
         members=result.get("members", []),
     )
-    print("Group members:")
+    print("Group members:", file=sys.stderr)
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
@@ -666,7 +676,7 @@ async def post_message(
         client_msg_id=client_msg_id,
         payload=result,
     )
-    print("Group message posted successfully:")
+    print("Group message posted successfully:", file=sys.stderr)
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
@@ -697,7 +707,7 @@ async def list_messages(
         group_id=group_id,
         payload=result,
     )
-    print("Group messages:")
+    print("Group messages:", file=sys.stderr)
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 

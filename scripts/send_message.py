@@ -129,7 +129,7 @@ async def send_message(
         except Exception:
             logger.debug("Failed to persist sent message locally", exc_info=True)
 
-        print("Message sent successfully:")
+        print("Message sent successfully:", file=sys.stderr)
         print(json.dumps(_strip_hidden_result_fields(result), indent=2, ensure_ascii=False))
         logger.info(
             "Message sent credential=%s msg_id=%s server_seq=%s",

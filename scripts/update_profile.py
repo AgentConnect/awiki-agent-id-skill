@@ -88,7 +88,7 @@ async def update_profile(
             client, PROFILE_RPC, "update_me", params,
             auth=auth, credential_name=credential_name,
         )
-        print("Profile updated successfully:")
+        print("Profile updated successfully:", file=sys.stderr)
         print(json.dumps(updated, indent=2, ensure_ascii=False))
 
 

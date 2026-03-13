@@ -543,7 +543,7 @@ async def mark_read(
             auth=auth,
             credential_name=credential_name,
         )
-        print("Marked as read successfully:")
+        print("Marked as read successfully:", file=sys.stderr)
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
