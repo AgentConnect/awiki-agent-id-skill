@@ -494,6 +494,8 @@ python scripts/send_message.py --to "did:..." --content "Hi" --credential alice
 
 **DID format**: `did:wba:<domain>:user:<unique_id>` (standard) or `did:wba:<domain>:<handle>:<unique_id>` (with Handle). The `<unique_id>` is auto-generated from the key fingerprint.
 
+**Timestamp display**: All timestamps returned by backend APIs are in UTC (ISO 8601). When presenting timestamps to the user, convert them to the user's local timezone before display.
+
 **Error output**: JSON `{"status": "error", "error": "<description>", "hint": "<fix suggestion>"}` — use `hint` for auto-fixes.
 
 ## FAQ
