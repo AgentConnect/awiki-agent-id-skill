@@ -101,6 +101,10 @@ python scripts/check_status.py                              # Mandatory E2EE aut
 python scripts/check_status.py --credential alice           # Specify credential
 python scripts/check_status.py --upgrade-only               # Run local upgrade / migration checks only
 
+# Real-time setup (one-click: settings.json + openclaw.json hooks + ws_listener service)
+python scripts/setup_realtime.py                             # Default credential
+python scripts/setup_realtime.py --credential alice          # Specify credential
+
 # WebSocket listener (background service management)
 python scripts/ws_listener.py install --credential default --mode smart  # Install and start
 python scripts/ws_listener.py install --credential default --config path/to/config.json  # Install with custom config
@@ -152,6 +156,7 @@ Three-layer architecture: CLI script layer -> Persistence layer -> Core utility 
 - **check_status.py**: Unified status check entry point — chains identity verification, inbox classification summary, server_seq-aware E2EE auto-processing, and plaintext delivery for unread encrypted messages. Outputs structured JSON. Called by Agent session startup protocol and heartbeat
 - **listener_config.py**: `ListenerConfig` + `RoutingRules` — WebSocket listener configuration module. Defines dual webhook endpoints, routing modes (agent-all/smart/wake-all), message routing rules and E2EE transparent processing parameters. Supports unified settings.json (`listener` sub-object, at `<DATA_DIR>/config/settings.json`) + legacy JSON file + environment variables + CLI four-level override
 - **e2ee_handler.py**: `E2eeHandler` — E2EE transparent handler for WebSocket listener. Intercepts E2EE messages before `classify_message`: protocol messages (init/rekey/error) are handled internally without forwarding, encrypted messages (e2ee_msg) are decrypted and forwarded as plaintext. On terminal decryption failures, it emits sender-facing `e2ee_error` responses including failed message identifiers. asyncio.Lock protects concurrency, periodic state saving
+- **setup_realtime.py**: One-click real-time setup — generates webhook token, creates/merges `<DATA_DIR>/config/settings.json` (listener config) and `~/.openclaw/openclaw.json` (OpenClaw hooks), then installs ws_listener background service. Idempotent: safe to run multiple times, existing config is merged not overwritten
 - **ws_listener.py**: WebSocket listener — persistent background process + cross-platform service lifecycle management. Reuses `WsClient` to connect to molt-message WebSocket. E2EE messages handled transparently by `E2eeHandler` (optional). Received messages stored to local SQLite via `local_store`. Others routed via `classify_message()` (agent/wake/discard) and forwarded to corresponding localhost webhook endpoints. Subcommands: `run` (foreground debug), `install` (install background service), `uninstall`, `start`/`stop`/`status` (management). Service management delegated to `service_manager.py`
 - **service_manager.py**: `ServiceManager` base class + `MacOSServiceManager` (launchd) / `LinuxServiceManager` (systemd) / `WindowsServiceManager` (Task Scheduler) + `get_service_manager()` factory. Handles install/uninstall/start/stop/status for each platform
 - Other scripts are CLI entry points for each feature, wrapping async calls via `asyncio.run()`

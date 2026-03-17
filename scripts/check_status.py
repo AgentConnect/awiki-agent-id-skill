@@ -1037,6 +1037,27 @@ async def check_status(
     else:
         report["e2ee_sessions"] = {"active": 0}
 
+    # 5. Real-time listener status
+    try:
+        from service_manager import get_service_manager
+        mgr_status = get_service_manager().status()
+        listener_report: dict[str, Any] = {
+            "installed": mgr_status.get("installed", False),
+            "running": mgr_status.get("running", False),
+        }
+        if not mgr_status.get("installed", False):
+            listener_report["hint"] = (
+                "Run: python scripts/setup_realtime.py --credential "
+                + credential_name
+            )
+        report["realtime_listener"] = listener_report
+    except Exception:
+        report["realtime_listener"] = {
+            "installed": False,
+            "running": False,
+            "hint": "Run: python scripts/setup_realtime.py",
+        }
+
     return report
 
 

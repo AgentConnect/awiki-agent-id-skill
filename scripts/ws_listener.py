@@ -3,8 +3,9 @@
 
 [INPUT]: credential_store (DID identity), SDKConfig, WsClient, ListenerConfig,
          E2eeHandler, service_manager, local_store, logging_config
-[OUTPUT]: WebSocket -> HTTP webhook bridge (agent/wake dual endpoints) + cross-platform
-          service lifecycle management + local SQLite message/group persistence
+[OUTPUT]: WebSocket -> OpenClaw TUI bridge (chat.inject RPC for instant display,
+          HTTP webhook fallback) + cross-platform service lifecycle
+          management + local SQLite message/group persistence
 [POS]: Standalone background process with cross-platform service management (launchd / systemd / Task Scheduler), reuses utils/ core tool layer
 
 [PROTOCOL]:
@@ -12,7 +13,7 @@
 2. Check the folder's CLAUDE.md after updating
 
 Core pipeline:
-  molt-message WS push -> listener receives -> E2EE intercept/decrypt -> route classification -> POST webhook
+  molt-message WS push -> listener receives -> E2EE intercept/decrypt -> route classification -> chat.inject to TUI
 
 Subcommands:
   run       Run in foreground (for debugging)
@@ -31,7 +32,9 @@ import json
 import logging
 import os
 import signal
+import shutil
 import sys
+from pathlib import Path
 from typing import Any
 
 # Ensure scripts/ is in sys.path (consistent with other scripts)
@@ -134,38 +137,24 @@ def classify_message(
 
 # --- Forwarding + Heartbeat --------------------------------------------------
 
-async def _forward(
-    http: httpx.AsyncClient,
-    url: str,
-    token: str,
-    params: dict[str, Any],
-    route: str,
-    cfg: ListenerConfig,
-) -> bool:
-    """Forward a message to an OpenClaw webhook endpoint.
+# Path to the openclaw CLI binary
+_OPENCLAW_BIN = (
+    shutil.which("openclaw")
+    or str(Path.home() / ".npm-global" / "bin" / "openclaw")
+)
 
-    Constructs different payloads based on route:
-    - agent -> POST /hooks/agent  {"message": "...", "name": "IM", "deliver": true, "channel": "last"}
-    - wake  -> POST /hooks/wake   {"text": "...", "mode": "now"}
 
-    The agent message includes all fields from the ANP new_message notification
-    (spec 09) so the receiving agent has full context for replies.
-    """
+def _build_event_text(params: dict[str, Any], route: str, cfg: ListenerConfig) -> str:
+    """Build the system event text from message params."""
     sender_did = params.get("sender_did", "unknown")
     sender = _truncate_did(sender_did)
     content = str(params.get("content", ""))
     content_preview = content[:50]
-    msg_type = params.get("type", "text")
     group_did = params.get("group_did")
     is_private = group_did is None and params.get("group_id") is None
-    e2ee_tag = "[E2EE] " if params.get("_e2ee") else ""
-
-    headers: dict[str, str] = {"Content-Type": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    msg_type = params.get("type", "text")
 
     if route == "agent":
-        # Build structured message with full ANP notification fields
         context = "DM" if is_private else "Group"
         lines = [f"[IM {context}] New {'encrypted ' if params.get('_e2ee') else ''}message"]
         lines.append(f"sender_did: {sender_did}")
@@ -191,40 +180,92 @@ async def _forward(
             lines.append(str(params.get("_e2ee_notice", "This is an encrypted message.")))
             lines.append("")
         lines.append(content)
-
-        body: dict[str, Any] = {
-            "message": "\n".join(lines),
-            "name": cfg.agent_hook_name,
-            "deliver": True,
-            "channel": "last",
-        }
+        return "\n".join(lines)
     else:
-        # OpenClaw /hooks/wake format
-        body = {
-            "text": (
-                f"[IM] {sender}: [Encrypted] {content_preview}"
-                if params.get("_e2ee")
-                else f"[IM] {sender}: {content_preview}"
-            ),
-            "mode": "next-heartbeat",
-        }
+        if params.get("_e2ee"):
+            return f"[IM] {sender}: [Encrypted] {content_preview}"
+        return f"[IM] {sender}: {content_preview}"
 
+
+async def _forward(
+    http: httpx.AsyncClient,
+    url: str,
+    token: str,
+    params: dict[str, Any],
+    route: str,
+    cfg: ListenerConfig,
+) -> bool:
+    """Forward a message to OpenClaw via ``chat.inject`` + HTTP ``/hooks/wake``.
+
+    Uses ``openclaw gateway call chat.inject`` which appends an assistant note
+    directly to the TUI transcript and broadcasts it to connected clients —
+    no model call, zero token cost, instant display.
+
+    Also calls HTTP ``/hooks/wake`` to trigger heartbeat, which handles
+    external channel delivery (Telegram, WhatsApp, etc.) when configured.
+    """
+    e2ee_tag = "[E2EE] " if params.get("_e2ee") else ""
+    sender = _truncate_did(params.get("sender_did", "unknown"))
+    text = _build_event_text(params, route, cfg)
+
+    # Primary: chat.inject (direct TUI injection, no model call)
+    inject_ok = False
+    inject_params = json.dumps(
+        {"sessionKey": "agent:main:main", "message": text},
+        ensure_ascii=False,
+    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            _OPENCLAW_BIN, "gateway", "call", "chat.inject",
+            "--params", inject_params, "--json",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+        stdout_str = stdout.decode().strip() if stdout else ""
+
+        if proc.returncode == 0 and "ok" in stdout_str.lower():
+            logger.info(
+                "%sForward success (chat.inject) route=%s sender=%s",
+                e2ee_tag, route, sender,
+            )
+            inject_ok = True
+        else:
+            stderr_str = stderr.decode().strip() if stderr else ""
+            logger.warning(
+                "%schat.inject failed route=%s exit=%d stdout=%s stderr=%s",
+                e2ee_tag, route, proc.returncode, stdout_str[:200], stderr_str[:200],
+            )
+    except asyncio.TimeoutError:
+        logger.warning("chat.inject timed out route=%s sender=%s", route, sender)
+    except FileNotFoundError:
+        logger.warning("openclaw CLI not found at %s", _OPENCLAW_BIN)
+    except Exception as exc:
+        logger.error("chat.inject error route=%s: %s", route, exc)
+
+    # HTTP /hooks/wake — also triggers heartbeat for external channel delivery
+    # (e.g. Telegram, WhatsApp).  When chat.inject succeeded this is a
+    # best-effort supplement; when it failed this is the primary fallback.
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    body = {"text": text, "mode": "now"}
     try:
         resp = await http.post(url, json=body, headers=headers)
         if resp.is_success:
             logger.info(
-                "%sForward success route=%s sender=%s -> %s [%d]",
-                e2ee_tag, route, sender, url, resp.status_code,
+                "%sForward success (HTTP wake) route=%s sender=%s [%d]",
+                e2ee_tag, route, sender, resp.status_code,
             )
-            return True
-        logger.warning(
-            "%sForward failed route=%s -> %s [%d] %s",
-            e2ee_tag, route, url, resp.status_code, resp.text[:200],
-        )
-        return False
+        else:
+            logger.warning(
+                "%sForward failed (HTTP wake) route=%s [%d] %s",
+                e2ee_tag, route, resp.status_code, resp.text[:200],
+            )
     except httpx.HTTPError as exc:
-        logger.error("Forward error route=%s -> %s: %s", route, url, exc)
-        return False
+        logger.warning("Forward error (HTTP wake) route=%s: %s", route, exc)
+
+    return inject_ok
 
 
 async def _heartbeat_task(ws: WsClient, interval: float) -> None:
@@ -482,7 +523,8 @@ async def listen_loop(
                             )
                             continue
 
-                        url = cfg.agent_webhook_url if route == "agent" else cfg.wake_webhook_url
+                        # All routes now use /hooks/wake to inject into main session
+                        url = cfg.wake_webhook_url
                         await _forward(http, url, cfg.webhook_token, params, route, cfg)
 
             except asyncio.CancelledError:
