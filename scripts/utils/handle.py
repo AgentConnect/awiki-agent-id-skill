@@ -261,12 +261,8 @@ async def wait_for_email_verification(
     """
     import sys
 
-    # 1. Check if email is already verified
-    verified, _ = await check_email_verified(client, email)
-    if verified:
-        return
-
-    # 2. Send activation email
+    # 1. Send activation email (always send in binding/registration flows to ensure
+    # the backend receives the correct context such as JWT-bound user_id).
     print(f"\nSending activation email to {email}...")
     if send_fn is not None:
         await send_fn()
@@ -274,10 +270,10 @@ async def wait_for_email_verification(
         await send_email_verification(client, email)
     print("Activation email sent. Please check your inbox and click the activation link.")
 
-    # 3. Wait for user to verify
+    # 2. Wait for user to verify
     input("\nPress Enter after you've verified your email: ")
 
-    # 4. Check verification status
+    # 3. Check verification status
     verified, _ = await check_email_verified(client, email)
     if not verified:
         print("Email not yet verified. Please click the activation link first.")
