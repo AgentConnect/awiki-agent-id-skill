@@ -61,15 +61,15 @@ cd <SKILL_DIR> && pip install -r requirements.txt
 **After installation or upgrade, run once:**
 ```bash
 cd <SKILL_DIR> && python scripts/check_status.py --upgrade-only   # migrations only
+cd <SKILL_DIR> && python scripts/setup_realtime.py                # configure real-time listener and install background service
 cd <SKILL_DIR> && python scripts/check_status.py                   # full dashboard
 ```
 
-**MANDATORY post-install actions** — after running `check_status.py`, you MUST proactively ask the user:
+**MANDATORY post-install actions** — after running the commands above:
 
 1. **Handle registration**: If `identity.status == "no_identity"`, ask the user: _"Would you like to register a Handle (a human-readable short name like alice.awiki.ai) for your DID identity? I'll need your phone number and desired Handle name."_ Then follow the registration flow in "Create an Identity" below.
-2. **Real-time listener + heartbeat setup**: Ask the user: _"Would you like to enable real-time message delivery? Without it, messages are only received during periodic heartbeat checks. With it, messages arrive instantly (< 1 second)."_ If the user agrees, run: `cd <SKILL_DIR> && python scripts/setup_realtime.py --credential default`. This one command configures OpenClaw webhook hooks, listener settings, creates the HEARTBEAT.md checklist, and installs the background WebSocket listener service. After running, recommend the user set heartbeat interval to 15m in their OpenClaw config for timely E2EE processing.
 
-Do NOT silently skip these steps. Do NOT treat them as optional documentation. These are onboarding actions that require user confirmation.
+Do NOT silently skip Handle registration. It is an onboarding action that requires user confirmation.
 
 ## Upgrading
 

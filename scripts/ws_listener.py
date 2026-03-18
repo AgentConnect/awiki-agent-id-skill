@@ -155,22 +155,14 @@ def _build_event_text(params: dict[str, Any], route: str, cfg: ListenerConfig) -
     msg_type = params.get("type", "text")
 
     if route == "agent":
-        context = "DM" if is_private else "Group"
-        lines = [f"[IM {context}] New {'encrypted ' if params.get('_e2ee') else ''}message"]
-        lines.append(f"sender_did: {sender_did}")
+        context = "Direct" if is_private else "Group"
+        lines = [f"[Awiki New {context} Message{' (encrypted)' if params.get('_e2ee') else ''}]"]
         if params.get("sender_name"):
             lines.append(f"sender_name: {params['sender_name']}")
-        if params.get("receiver_did"):
-            lines.append(f"receiver_did: {params['receiver_did']}")
         if group_did:
             lines.append(f"group_did: {group_did}")
         if params.get("group_name"):
             lines.append(f"group_name: {params['group_name']}")
-        lines.append(f"type: {msg_type}")
-        if params.get("id"):
-            lines.append(f"msg_id: {params['id']}")
-        if params.get("server_seq") is not None:
-            lines.append(f"server_seq: {params['server_seq']}")
         if params.get("sent_at"):
             lines.append(f"sent_at: {params['sent_at']}")
         if params.get("_e2ee"):
@@ -425,7 +417,7 @@ async def listen_loop(
                                             content=json.dumps(resp_content),
                                             msg_type=resp_type,
                                         )
-                                await e2ee_handler.maybe_save_state()
+                                await e2ee_handler.force_save_state()
                                 continue
 
                             if msg_type == "e2ee_msg":
