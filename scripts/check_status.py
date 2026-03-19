@@ -212,7 +212,7 @@ def _build_visible_inbox_report(
 
 
 def summarize_group_watch(owner_did: str | None) -> dict[str, Any]:
-    """Summarize locally tracked discovery groups for heartbeat decisions."""
+    """Summarize locally tracked groups for heartbeat decisions."""
     if not owner_did:
         return {"status": "no_identity", "active_groups": 0, "groups": []}
 
@@ -225,6 +225,7 @@ def summarize_group_watch(owner_did: str | None) -> dict[str, Any]:
                 SELECT
                     group_id,
                     name,
+                    group_mode,
                     slug,
                     my_role,
                     member_count,
@@ -310,6 +311,7 @@ def summarize_group_watch(owner_did: str | None) -> dict[str, Any]:
                     {
                         "group_id": group_id,
                         "name": row["name"],
+                        "group_mode": row["group_mode"],
                         "slug": row["slug"],
                         "my_role": row["my_role"],
                         "member_count": row["member_count"],

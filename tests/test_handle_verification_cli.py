@@ -1,9 +1,9 @@
-"""Unit tests for verification-code CLI flows.
+"""Unit tests for non-interactive verification CLI flows.
 
-[INPUT]: send_verification_code/register_handle/recover_handle CLI modules,
-         monkeypatched async SDK calls, and CLI argv
-[OUTPUT]: Regression coverage for non-interactive verification-code workflows
-[POS]: Handle CLI unit tests for send-first verification and OTP enforcement
+[INPUT]: send_verification_code/register_handle/recover_handle/bind_contact CLI
+         modules, monkeypatched async SDK calls, and CLI argv
+[OUTPUT]: Regression coverage for OTP-first and activation-link-first workflows
+[POS]: CLI tests for non-interactive verification behavior
 
 [PROTOCOL]:
 1. Update this header when logic changes
@@ -19,12 +19,13 @@ from pathlib import Path
 import pytest
 
 _scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
-if str(_scripts_dir) not in sys.path:
-    sys.path.insert(0, str(_scripts_dir))
+sys.path.insert(0, str(_scripts_dir))
 
+import bind_contact as bind_cli  # noqa: E402
 import recover_handle as recover_cli  # noqa: E402
 import register_handle as register_cli  # noqa: E402
 import send_verification_code as verification_cli  # noqa: E402
+from utils.handle import EmailVerificationResult  # noqa: E402
 
 
 class _AsyncClientContext:
@@ -38,10 +39,25 @@ class _AsyncClientContext:
         return False
 
 
-def test_send_verification_code_sends_phone_otp(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
+class _ArgvContext:
+    """Temporarily replace sys.argv for CLI entry-point tests."""
+
+    def __init__(self, argv: list[str]):
+        self._argv = argv
+        self._old_argv: list[str] | None = None
+
+    def __enter__(self) -> None:
+        self._old_argv = sys.argv[:]
+        sys.argv = self._argv[:]
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        del exc_type, exc, tb
+        assert self._old_argv is not None
+        sys.argv = self._old_argv
+        return False
+
+
+def test_send_verification_code_sends_phone_otp(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     """The verification CLI should normalize phone numbers and send OTPs."""
     captured: dict[str, str] = {}
 
@@ -51,76 +67,188 @@ def test_send_verification_code_sends_phone_otp(
         lambda config: _AsyncClientContext(),
     )
 
-    async def fake_send_otp(client: object, phone: str) -> dict[str, str]:
+    async def fake_send_otp(client, phone):
         del client
         captured["phone"] = phone
         return {"status": "ok"}
 
     monkeypatch.setattr(verification_cli, "send_otp", fake_send_otp)
 
-    asyncio.run(verification_cli.send_verification_code(phone="13800138000"))
+    asyncio.run(verification_cli.do_send("13800138000"))
 
-    assert captured["phone"] == "+8613800138000"
     output = capsys.readouterr().out
+    assert captured["phone"] == "13800138000"
     assert "Verification code sent successfully." in output
     assert "Next step" in output
 
 
+
 def test_register_handle_main_requires_preissued_otp(
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+    capsys,
 ) -> None:
-    """register_handle CLI should reject missing OTPs with send-first guidance."""
+    """register_handle should reject phone registration without a pre-issued OTP."""
     monkeypatch.setattr(register_cli, "configure_logging", lambda **kwargs: None)
-    monkeypatch.setattr(
-        register_cli,
-        "create_user_service_client",
-        lambda config: pytest.fail(f"Unexpected client creation: {config}"),
-    )
-    monkeypatch.setattr(
-        sys,
-        "argv",
+    monkeypatch.setattr(register_cli, "create_user_service_client", lambda config: _AsyncClientContext())
+
+    with _ArgvContext(
         [
             "register_handle.py",
             "--handle",
             "alice",
             "--phone",
             "+8613800138000",
-        ],
-    )
-
-    with pytest.raises(SystemExit) as exc_info:
-        register_cli.main()
+        ]
+    ):
+        with pytest.raises(SystemExit) as exc_info:
+            register_cli.main()
 
     assert exc_info.value.code == 2
     assert "send_verification_code.py" in capsys.readouterr().err
 
 
+
 def test_recover_handle_main_requires_preissued_otp(
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
+    capsys,
 ) -> None:
-    """recover_handle CLI should reject missing OTPs with send-first guidance."""
+    """recover_handle should reject phone recovery without a pre-issued OTP."""
     monkeypatch.setattr(recover_cli, "configure_logging", lambda **kwargs: None)
-    monkeypatch.setattr(
-        recover_cli,
-        "create_user_service_client",
-        lambda config: pytest.fail(f"Unexpected client creation: {config}"),
-    )
-    monkeypatch.setattr(
-        sys,
-        "argv",
+    monkeypatch.setattr(recover_cli, "create_user_service_client", lambda config: _AsyncClientContext())
+
+    with _ArgvContext(
         [
             "recover_handle.py",
             "--handle",
             "alice",
             "--phone",
             "+8613800138000",
-        ],
-    )
-
-    with pytest.raises(SystemExit) as exc_info:
-        recover_cli.main()
+        ]
+    ):
+        with pytest.raises(SystemExit) as exc_info:
+            recover_cli.main()
 
     assert exc_info.value.code == 2
     assert "send_verification_code.py" in capsys.readouterr().err
+
+
+
+def test_do_register_email_returns_pending_when_verification_is_not_complete(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    """Email registration should return pending instead of prompting for stdin."""
+    monkeypatch.setattr(register_cli, "create_user_service_client", lambda config: _AsyncClientContext())
+
+    async def fake_ensure_email_verification(client, email, **kwargs):
+        del client, email, kwargs
+        return EmailVerificationResult(verified=False, activation_sent=True, verified_at=None)
+
+    monkeypatch.setattr(register_cli, "ensure_email_verification", fake_ensure_email_verification)
+    monkeypatch.setattr(
+        register_cli,
+        "register_handle_with_email",
+        lambda **kwargs: pytest.fail(f"register_handle_with_email should not be called: {kwargs}"),
+    )
+
+    completed = asyncio.run(
+        register_cli.do_register(
+            handle="alice",
+            email="user@example.com",
+        )
+    )
+
+    assert completed is False
+    assert "Email verification pending." in capsys.readouterr().out
+
+
+
+def test_bind_contact_send_phone_otp_flow(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    """Phone binding should support an explicit send-only OTP step."""
+    monkeypatch.setattr(bind_cli, "create_user_service_client", lambda config: _AsyncClientContext())
+    monkeypatch.setattr(
+        bind_cli,
+        "load_identity",
+        lambda name: {"jwt_token": "jwt-token"} if name == "default" else None,
+    )
+    captured: dict[str, str] = {}
+
+    async def fake_bind_phone_send_otp(client, phone, jwt_token):
+        del client
+        captured["phone"] = phone
+        captured["jwt_token"] = jwt_token
+        return {"message": "sent"}
+
+    monkeypatch.setattr(bind_cli, "bind_phone_send_otp", fake_bind_phone_send_otp)
+
+    completed = asyncio.run(
+        bind_cli.do_bind(
+            bind_phone="+8613800138000",
+            send_phone_otp=True,
+            credential_name="default",
+        )
+    )
+
+    output = capsys.readouterr().out
+    assert completed is True
+    assert captured == {"phone": "+8613800138000", "jwt_token": "jwt-token"}
+    assert "OTP sent." in output
+    assert "Next step" in output
+
+
+
+def test_bind_contact_main_requires_explicit_phone_step(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    """Phone binding should require either --send-phone-otp or --otp-code."""
+    monkeypatch.setattr(bind_cli, "configure_logging", lambda **kwargs: None)
+    monkeypatch.setattr(bind_cli, "create_user_service_client", lambda config: _AsyncClientContext())
+    monkeypatch.setattr(
+        bind_cli,
+        "load_identity",
+        lambda name: {"jwt_token": "jwt-token"} if name == "default" else None,
+    )
+
+    with _ArgvContext(
+        [
+            "bind_contact.py",
+            "--bind-phone",
+            "+8613800138000",
+        ]
+    ):
+        with pytest.raises(SystemExit) as exc_info:
+            bind_cli.main()
+
+    assert exc_info.value.code == 2
+    assert "--send-phone-otp" in capsys.readouterr().err
+
+
+
+def test_bind_contact_email_pending_exits_non_interactively(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    """Email binding should return pending instead of requesting stdin."""
+    monkeypatch.setattr(bind_cli, "create_user_service_client", lambda config: _AsyncClientContext())
+    monkeypatch.setattr(
+        bind_cli,
+        "load_identity",
+        lambda name: {"jwt_token": "jwt-token"} if name == "default" else None,
+    )
+
+    async def fake_ensure_email_verification(client, email, **kwargs):
+        del client, email, kwargs
+        return EmailVerificationResult(verified=False, activation_sent=True, verified_at=None)
+
+    monkeypatch.setattr(bind_cli, "ensure_email_verification", fake_ensure_email_verification)
+
+    completed = asyncio.run(
+        bind_cli.do_bind(
+            bind_email="user@example.com",
+            credential_name="default",
+        )
+    )
+
+    assert completed is False
+    assert "Email verification pending." in capsys.readouterr().out

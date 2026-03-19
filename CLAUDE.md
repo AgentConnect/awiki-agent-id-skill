@@ -21,8 +21,8 @@ DID (Decentralized Identifier) identity interaction Skill. Built on the ANP prot
 All scripts must be run from the project root (`python scripts/<name>.py`). Python automatically adds `scripts/` to `sys.path` for resolving `from utils import ...` imports. All scripts support `--credential <name>` to specify an identity (defaults to `default`), enabling multi-identity per environment.
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies (also runs local database upgrade checks)
+python install_dependencies.py
 
 # Identity management
 python scripts/setup_identity.py --name "AgentName"          # Create identity
@@ -44,13 +44,20 @@ python scripts/update_profile.py --nick-name "Name" --bio "Bio" --tags "tag1,tag
 python scripts/search_users.py "alice"                     # Search users
 python scripts/search_users.py "AI agent" --credential bob # Search with specific credential
 
-# Handle (short name) registration and resolution
+# Handle (short name) registration and resolution (supports phone and email verification)
 python scripts/send_verification_code.py --phone +8613800138000
 python scripts/register_handle.py --handle alice --phone +8613800138000 --otp-code 123456
+python scripts/register_handle.py --handle alice --email user@example.com
+python scripts/register_handle.py --handle alice --email user@example.com --wait-for-email-verification
 python scripts/register_handle.py --handle bob --phone +8613800138000 --otp-code 123456 --invite-code ABC123
-python scripts/recover_handle.py --handle alice --phone +8613800138000 --otp-code 123456
 python scripts/resolve_handle.py --handle alice               # Resolve handle to DID
 python scripts/resolve_handle.py --did "<DID>"                # Look up handle by DID
+
+# Bind contact info (requires existing identity with JWT)
+python scripts/bind_contact.py --bind-email user@example.com                           # Send email activation or complete email bind
+python scripts/bind_contact.py --bind-email user@example.com --wait-for-email-verification
+python scripts/bind_contact.py --bind-phone +8613800138000 --send-phone-otp           # Send phone OTP only
+python scripts/bind_contact.py --bind-phone +8613800138000 --otp-code 123456          # Complete phone bind with a pre-issued OTP
 
 # Messaging (requires identity creation first)
 python scripts/send_message.py --to "<DID>" --content "hello"
@@ -138,7 +145,7 @@ Three-layer architecture: CLI script layer -> Persistence layer -> Core utility 
 - **auth.py**: DID auth helpers — `create_authenticated_identity()` chains create identity -> `register_did()` -> `get_jwt_via_wba()` for first-time setup; `update_did_document()` uses DID WBA auth to update an existing DID document without re-registering
 - **client.py**: httpx AsyncClient factory (`create_user_service_client`, `create_molt_message_client`), 30s timeout, `trust_env=False`
 - **rpc.py**: JSON-RPC 2.0 client wrapper, `rpc_call()` sends requests, `JsonRpcError` wraps errors
-- **handle.py**: Handle (short name) registration and resolution — `send_otp()`, `register_handle()` (one-stop: create identity + register DID with handle + JWT), `resolve_handle()`, `lookup_handle()`. Uses `/user-service/handle/rpc` and `/user-service/did-auth/rpc` endpoints
+- **handle.py**: Handle (short name) registration and resolution — `send_otp()`, `register_handle()` (one-stop: create identity + register DID with handle + JWT), `resolve_handle()`, `lookup_handle()`, `send_email_verification()`, `check_email_verified()`, `register_handle_with_email()`, `bind_email_send()`, `bind_phone_send_otp()`, `bind_phone_verify()`. Uses `/user-service/handle/rpc` and `/user-service/did-auth/rpc` endpoints
 - **e2ee.py**: `E2eeClient` — Uses HPKE (RFC 9180, X25519 key agreement + chain Ratchet forward secrecy). One-step initialization (no multi-step handshake). Key separation: key-2 secp256r1 for signing + key-3 X25519 for key agreement (separate from DID's secp256k1). Supports `export_state()`/`from_state()` for cross-process state recovery
 - **ws.py**: `WsClient` — WebSocket client wrapper. Uses JWT query parameter authentication to connect to molt-message `/message/ws` endpoint. Supports JSON-RPC request/response, push notification reception, application-layer heartbeat (ping/pong)
 - **resolve.py**: `resolve_to_did()` — Handle-to-DID resolution. If input starts with `did:`, returns as-is. Otherwise calls `GET /user-service/.well-known/handle/{local_part}` (no auth required). Always resolves via server, no local cache
@@ -147,7 +154,7 @@ Three-layer architecture: CLI script layer -> Persistence layer -> Core utility 
 ### scripts/ — CLI Script Layer
 
 - **credential_store.py** / **e2ee_store.py**: Credential and E2EE state persistence to `~/.openclaw/credentials/awiki-agent-id-message/` directory (JSON format, 600 permissions)
-- **local_store.py**: SQLite local storage — contacts + `relationship_events` + messages + `groups` + `group_members` + `e2ee_outbox`, plus threads/inbox/outbox views. Single shared database at `<DATA_DIR>/database/awiki.db`. Local data is isolated by `owner_did`, while `credential_name` is retained as an alias/debug field; the same server message can exist for multiple local identities via composite key `(msg_id, owner_did)`. `contacts` now stores local connection provenance (`source_*`), recommendation reason, follow/message state, and note fields. `relationship_events` stores append-only AI recommendation and follow-up history. Messages also support an optional plaintext `title` field. `groups` stores local discovery-group snapshots (owner/member role, membership status, join code state, sync cursors), and `group_members` caches the latest active-member snapshot per group, including `profile_url`. `e2ee_outbox` tracks encrypted send attempts, peer-side failures, and resend/drop decisions. WAL mode for concurrent read/write. Sync API (sqlite3 stdlib), ws_listener wraps via `asyncio.to_thread()`. Schema versioned via `PRAGMA user_version` (current: v9)
+- **local_store.py**: SQLite local storage — contacts + `relationship_events` + messages + `groups` + `group_members` + `e2ee_outbox`, plus threads/inbox/outbox views. Single shared database at `<DATA_DIR>/database/awiki.db`. Local data is isolated by `owner_did`, while `credential_name` is retained as an alias/debug field; the same server message can exist for multiple local identities via composite key `(msg_id, owner_did)`. `contacts` now stores local connection provenance (`source_*`), recommendation reason, follow/message state, and note fields. `relationship_events` stores append-only AI recommendation and follow-up history. Messages also support an optional plaintext `title` field. `groups` stores local unified-group snapshots (owner/member role, cached `group_mode=general`, membership status, join code state, sync cursors), and `group_members` caches the latest active-member snapshot per group, including `profile_url`. `e2ee_outbox` tracks encrypted send attempts, peer-side failures, and resend/drop decisions. WAL mode for concurrent read/write. Sync API (sqlite3 stdlib), ws_listener wraps via `asyncio.to_thread()`. Schema versioned via `PRAGMA user_version` (current: v10)
 - **query_db.py**: Read-only SQL query CLI — accepts a SELECT statement, executes against local SQLite, returns JSON. Rejects write operations and multi-statement queries. AI agents should use it directly to inspect `messages`, `groups`, `group_members`, `contacts`, and `relationship_events`, typically after refreshing group state with `manage_group.py --get/--members/--list-messages`
 - **search_users.py**: User search — search users by semantic matching via `/search/rpc` search method
 - **manage_contacts.py**: Local relationship-sedimentation CLI — records AI recommendations, saves confirmed contacts from groups, and updates follow/message/note state without writing SQL directly
@@ -156,6 +163,7 @@ Three-layer architecture: CLI script layer -> Persistence layer -> Core utility 
 - **e2ee_handler.py**: `E2eeHandler` — E2EE transparent handler for WebSocket listener. Intercepts E2EE messages before `classify_message`: protocol messages (init/rekey/error) are handled internally without forwarding, encrypted messages (e2ee_msg) are decrypted and forwarded as plaintext. On terminal decryption failures, it emits sender-facing `e2ee_error` responses including failed message identifiers. asyncio.Lock protects concurrency, periodic state saving
 - **ws_listener.py**: WebSocket listener — persistent background process + cross-platform service lifecycle management. Reuses `WsClient` to connect to molt-message WebSocket. E2EE messages handled transparently by `E2eeHandler` (optional). Received messages stored to local SQLite via `local_store`. Others routed via `classify_message()` (agent/wake/discard) and forwarded to corresponding localhost webhook endpoints. Subcommands: `run` (foreground debug), `install` (install background service), `uninstall`, `start`/`stop`/`status` (management). Service management delegated to `service_manager.py`
 - **service_manager.py**: `ServiceManager` base class + `MacOSServiceManager` (launchd) / `LinuxServiceManager` (systemd) / `WindowsServiceManager` (Task Scheduler) + `get_service_manager()` factory. Handles install/uninstall/start/stop/status for each platform
+- **bind_contact.py**: Contact binding CLI — bind email or phone number to an existing authenticated account with pure non-interactive flows (`bind_email_send()`, `bind_phone_send_otp()`, `bind_phone_verify()` from handle.py)
 - Other scripts are CLI entry points for each feature, wrapping async calls via `asyncio.run()`
 
 ### service/ — Cross-Platform Service Management

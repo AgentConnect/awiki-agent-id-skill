@@ -32,7 +32,7 @@ from utils.config import SDKConfig
 
 logger = logging.getLogger(__name__)
 
-_SCHEMA_VERSION = 9
+_SCHEMA_VERSION = 10
 
 _V6_TABLES_SQL = """
     CREATE TABLE IF NOT EXISTS contacts (
@@ -111,6 +111,7 @@ _V7_EXTRA_TABLES_SQL = """
         group_id           TEXT NOT NULL,
         group_did          TEXT,
         name               TEXT,
+        group_mode         TEXT NOT NULL DEFAULT 'general',
         slug               TEXT,
         description        TEXT,
         goal               TEXT,
@@ -765,6 +766,18 @@ def _ensure_v9_group_member_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE group_members ADD COLUMN profile_url TEXT")
 
 
+def _ensure_v10_group_columns(conn: sqlite3.Connection) -> None:
+    """Ensure the group mode column added in v10 exists."""
+    group_columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(groups)").fetchall()
+    }
+    if "group_mode" not in group_columns:
+        conn.execute(
+            "ALTER TABLE groups ADD COLUMN group_mode TEXT NOT NULL DEFAULT 'general'"
+        )
+
+
 def _upgrade_schema_v7_to_v8(conn: sqlite3.Connection) -> None:
     """Add contact provenance fields and relationship events on top of schema v7."""
     logger.info("Upgrading local schema from version=7 to version=%d", _SCHEMA_VERSION)
@@ -786,6 +799,17 @@ def _upgrade_schema_v8_to_v9(conn: sqlite3.Connection) -> None:
     _recreate_v6_views(conn)
 
 
+def _upgrade_schema_v9_to_v10(conn: sqlite3.Connection) -> None:
+    """Add group mode snapshots on top of schema v9."""
+    logger.info("Upgrading local schema from version=9 to version=%d", _SCHEMA_VERSION)
+    _ensure_v9_group_member_columns(conn)
+    _ensure_v10_group_columns(conn)
+    _ensure_v6_indexes(conn)
+    _ensure_v7_indexes(conn)
+    _ensure_v8_indexes(conn)
+    _recreate_v6_views(conn)
+
+
 def ensure_schema(conn: sqlite3.Connection) -> None:
     """Create tables, views, and indexes if they don't exist."""
     version = conn.execute("PRAGMA user_version").fetchone()[0]
@@ -795,6 +819,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         conn.executescript(_V8_EXTRA_TABLES_SQL)
         _ensure_v8_contact_columns(conn)
         _ensure_v9_group_member_columns(conn)
+        _ensure_v10_group_columns(conn)
         repaired_indexes = (
             _ensure_v6_indexes(conn)
             + _ensure_v7_indexes(conn)
@@ -827,6 +852,9 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             version = 8
         if version < 9:
             _upgrade_schema_v8_to_v9(conn)
+            version = 9
+        if version < 10:
+            _upgrade_schema_v9_to_v10(conn)
 
     conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
     conn.commit()
@@ -1437,6 +1465,7 @@ def upsert_group(
     group_id: str,
     group_did: str | None = None,
     name: str | None = None,
+    group_mode: str | None = None,
     slug: str | None = None,
     description: str | None = None,
     goal: str | None = None,
@@ -1478,6 +1507,7 @@ def upsert_group(
         "group_id": group_id,
         "group_did": row.get("group_did"),
         "name": row.get("name"),
+        "group_mode": row.get("group_mode", "general"),
         "slug": row.get("slug"),
         "description": row.get("description"),
         "goal": row.get("goal"),
@@ -1505,6 +1535,7 @@ def upsert_group(
     updates = {
         "group_did": _normalize_optional_text(group_did),
         "name": _normalize_optional_text(name),
+        "group_mode": _normalize_optional_text(group_mode),
         "slug": _normalize_optional_text(slug),
         "description": _normalize_optional_text(description),
         "goal": _normalize_optional_text(goal),
@@ -1537,6 +1568,7 @@ def upsert_group(
         "group_id",
         "group_did",
         "name",
+        "group_mode",
         "slug",
         "description",
         "goal",
@@ -1918,12 +1950,12 @@ def rebind_owner_did(
     conn.execute(
         """
         INSERT OR REPLACE INTO groups
-        (owner_did, group_id, group_did, name, slug, description, goal, rules,
+        (owner_did, group_id, group_did, name, group_mode, slug, description, goal, rules,
          message_prompt, doc_url, group_owner_did, group_owner_handle, my_role,
          membership_status, join_enabled, join_code, join_code_expires_at, member_count, last_synced_seq,
          last_read_seq, last_message_at, remote_created_at, remote_updated_at,
          stored_at, metadata, credential_name)
-        SELECT ?, group_id, group_did, name, slug, description, goal, rules,
+        SELECT ?, group_id, group_did, name, group_mode, slug, description, goal, rules,
                message_prompt, doc_url, group_owner_did, group_owner_handle, my_role,
                membership_status, join_enabled, join_code, join_code_expires_at, member_count, last_synced_seq,
                last_read_seq, last_message_at, remote_created_at, remote_updated_at,
