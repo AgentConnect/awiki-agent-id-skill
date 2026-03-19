@@ -141,13 +141,17 @@ async def do_recover(
 
     async with create_user_service_client(config) as client:
         if otp_code is None:
+            if not sys.stdin.isatty():
+                raise ValueError(
+                    "OTP code is required in non-interactive mode. "
+                    f"First run: python scripts/send_verification_code.py --phone {phone}"
+                )
             print(f"Sending OTP to {phone}...")
             await send_otp(client, phone)
             print("OTP sent. Check your phone.")
             otp_code = input("Enter OTP code: ").strip()
             if not otp_code:
-                print("OTP code is required.")
-                sys.exit(1)
+                raise ValueError("OTP code is required.")
 
         identity, recover_result = await recover_handle(
             client,

@@ -21,8 +21,8 @@ DID (Decentralized Identifier) identity interaction Skill. Built on the ANP prot
 All scripts must be run from the project root (`python scripts/<name>.py`). Python automatically adds `scripts/` to `sys.path` for resolving `from utils import ...` imports. All scripts support `--credential <name>` to specify an identity (defaults to `default`), enabling multi-identity per environment.
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies (also runs local database upgrade checks)
+python install_dependencies.py
 
 # Identity management
 python scripts/setup_identity.py --name "AgentName"          # Create identity
@@ -45,6 +45,7 @@ python scripts/search_users.py "alice"                     # Search users
 python scripts/search_users.py "AI agent" --credential bob # Search with specific credential
 
 # Handle (short name) registration and resolution
+python scripts/send_verification_code.py --phone +8613800138000
 python scripts/register_handle.py --handle alice --phone +8613800138000
 python scripts/register_handle.py --handle bob --phone +8613800138000 --invite-code ABC123
 python scripts/resolve_handle.py --handle alice               # Resolve handle to DID
@@ -145,7 +146,7 @@ Three-layer architecture: CLI script layer -> Persistence layer -> Core utility 
 ### scripts/ — CLI Script Layer
 
 - **credential_store.py** / **e2ee_store.py**: Credential and E2EE state persistence to `~/.openclaw/credentials/awiki-agent-id-message/` directory (JSON format, 600 permissions)
-- **local_store.py**: SQLite local storage — contacts + `relationship_events` + messages + `groups` + `group_members` + `e2ee_outbox`, plus threads/inbox/outbox views. Single shared database at `<DATA_DIR>/database/awiki.db`. Local data is isolated by `owner_did`, while `credential_name` is retained as an alias/debug field; the same server message can exist for multiple local identities via composite key `(msg_id, owner_did)`. `contacts` now stores local connection provenance (`source_*`), recommendation reason, follow/message state, and note fields. `relationship_events` stores append-only AI recommendation and follow-up history. Messages also support an optional plaintext `title` field. `groups` stores local discovery-group snapshots (owner/member role, membership status, join code state, sync cursors), and `group_members` caches the latest active-member snapshot per group, including `profile_url`. `e2ee_outbox` tracks encrypted send attempts, peer-side failures, and resend/drop decisions. WAL mode for concurrent read/write. Sync API (sqlite3 stdlib), ws_listener wraps via `asyncio.to_thread()`. Schema versioned via `PRAGMA user_version` (current: v9)
+- **local_store.py**: SQLite local storage — contacts + `relationship_events` + messages + `groups` + `group_members` + `e2ee_outbox`, plus threads/inbox/outbox views. Single shared database at `<DATA_DIR>/database/awiki.db`. Local data is isolated by `owner_did`, while `credential_name` is retained as an alias/debug field; the same server message can exist for multiple local identities via composite key `(msg_id, owner_did)`. `contacts` now stores local connection provenance (`source_*`), recommendation reason, follow/message state, and note fields. `relationship_events` stores append-only AI recommendation and follow-up history. Messages also support an optional plaintext `title` field. `groups` stores local unified-group snapshots (owner/member role, cached `group_mode=general`, membership status, join code state, sync cursors), and `group_members` caches the latest active-member snapshot per group, including `profile_url`. `e2ee_outbox` tracks encrypted send attempts, peer-side failures, and resend/drop decisions. WAL mode for concurrent read/write. Sync API (sqlite3 stdlib), ws_listener wraps via `asyncio.to_thread()`. Schema versioned via `PRAGMA user_version` (current: v10)
 - **query_db.py**: Read-only SQL query CLI — accepts a SELECT statement, executes against local SQLite, returns JSON. Rejects write operations and multi-statement queries. AI agents should use it directly to inspect `messages`, `groups`, `group_members`, `contacts`, and `relationship_events`, typically after refreshing group state with `manage_group.py --get/--members/--list-messages`
 - **search_users.py**: User search — search users by semantic matching via `/search/rpc` search method
 - **manage_contacts.py**: Local relationship-sedimentation CLI — records AI recommendations, saves confirmed contacts from groups, and updates follow/message/note state without writing SQL directly

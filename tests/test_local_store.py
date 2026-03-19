@@ -89,14 +89,14 @@ class TestSchema:
 
     def test_schema_version(self, db):
         version = db.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 9
+        assert version == 10
 
     def test_ensure_schema_idempotent(self, db):
         """Calling ensure_schema multiple times is safe."""
         local_store.ensure_schema(db)
         local_store.ensure_schema(db)
         version = db.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 9
+        assert version == 10
 
     def test_wal_mode(self, db):
         mode = db.execute("PRAGMA journal_mode").fetchone()[0]
@@ -165,7 +165,7 @@ class TestSchema:
         after_indexes = _schema_object_names(db, "index")
         version = db.execute("PRAGMA user_version").fetchone()[0]
 
-        assert version == 9
+        assert version == 10
         assert EXPECTED_SCHEMA_INDEXES <= after_indexes
 
 
@@ -468,6 +468,7 @@ class TestGroups:
             "SELECT * FROM groups WHERE owner_did='did:alice' AND group_id='grp_1'"
         ).fetchone()
         assert row["name"] == "OpenClaw Meetup"
+        assert row["group_mode"] == "general"
         assert row["my_role"] == "owner"
         assert row["join_enabled"] == 1
         assert row["join_code"] == "314159"
@@ -898,7 +899,7 @@ class TestMigration:
         }
         conn.close()
 
-        assert version == 9
+        assert version == 10
         assert migrated_message["owner_did"] == "did:alice"
         assert migrated_contact["owner_did"] == "did:alice"
         assert migrated_outbox["owner_did"] == "did:alice"

@@ -78,7 +78,7 @@ allows the same server message to be stored for multiple local identities.
 
 ### groups
 
-Stores the local snapshot of discovery groups for one local DID owner.
+Stores the local snapshot of discovery/chat groups for one local DID owner.
 
 | Column | Type | Constraint | Description |
 |--------|------|------------|-------------|
@@ -86,6 +86,7 @@ Stores the local snapshot of discovery groups for one local DID owner.
 | group_id | TEXT | PRIMARY KEY (with `owner_did`) | Group identifier |
 | group_did | TEXT | | Group DID if known locally |
 | name | TEXT | | Group display name |
+| group_mode | TEXT | NOT NULL, DEFAULT `discovery` | Remote group mode (`discovery` / `chat`) |
 | slug | TEXT | | Group slug |
 | description | TEXT | | Group description |
 | goal | TEXT | | Group goal |
@@ -201,7 +202,7 @@ Thread IDs are deterministic and symmetric:
 
 ## Schema Versioning
 
-Schema version tracked via `PRAGMA user_version`. Current version: **9**.
+Schema version tracked via `PRAGMA user_version`. Current version: **10**.
 
 Migration history:
 - v1 → v2: adds `credential_name TEXT` column and `idx_messages_credential` index

@@ -1,8 +1,8 @@
-"""Tests for discovery-group heartbeat summaries in check_status.
+"""Tests for group heartbeat summaries in check_status.
 
 [INPUT]: check_status group-watch helper, local_store SQLite fixtures, and monkeypatched status helpers
 [OUTPUT]: Regression coverage for active-group heartbeat summaries and report integration
-[POS]: Unit tests for discovery-group watch state exposed by check_status.py
+[POS]: Unit tests for group watch state exposed by check_status.py
 
 [PROTOCOL]:
 1. Update this header when logic changes
@@ -40,6 +40,7 @@ def test_summarize_group_watch_reports_active_group_metrics(
             owner_did="did:alice",
             group_id="grp_1",
             name="OpenClaw Meetup",
+            group_mode="general",
             slug="openclaw-meetup",
             my_role="member",
             membership_status="active",
@@ -132,6 +133,7 @@ def test_summarize_group_watch_reports_active_group_metrics(
     assert summary["groups_with_pending_recommendations"] == 1
     group = summary["groups"][0]
     assert group["group_id"] == "grp_1"
+    assert group["group_mode"] == "general"
     assert group["tracked_active_members"] == 5
     assert group["local_group_user_messages"] == 2
     assert group["local_owner_messages"] == 1

@@ -1,4 +1,4 @@
-"""Register a Handle (human-readable DID alias) interactively.
+"""Register a Handle (human-readable DID alias).
 
 Usage:
     # Register a Handle (will prompt for OTP)
@@ -13,7 +13,8 @@ Usage:
 [INPUT]: SDK (handle registration, OTP), credential_store (save identity),
          logging_config
 [OUTPUT]: Register Handle + DID identity and save credentials
-[POS]: Interactive CLI for Handle registration
+[POS]: CLI for Handle registration, with interactive OTP prompt only when stdin
+       is a real TTY
 
 [PROTOCOL]:
 1. Update this header when logic changes
@@ -53,15 +54,19 @@ async def do_register(
     print(f"  DID domain  : {config.did_domain}")
 
     async with create_user_service_client(config) as client:
-        # 1. Send OTP if not provided
+        # 1. Send OTP interactively only when stdin is a real TTY
         if otp_code is None:
+            if not sys.stdin.isatty():
+                raise ValueError(
+                    "OTP code is required in non-interactive mode. "
+                    f"First run: python scripts/send_verification_code.py --phone {phone}"
+                )
             print(f"\nSending OTP to {phone}...")
             await send_otp(client, phone)
             print("OTP sent. Check your phone.")
             otp_code = input("Enter OTP code: ").strip()
             if not otp_code:
-                print("OTP code is required.")
-                sys.exit(1)
+                raise ValueError("OTP code is required.")
 
         # 2. Register Handle
         print(f"\nRegistering Handle '{handle}'...")
@@ -127,14 +132,17 @@ def main() -> None:
         args.handle,
         args.credential,
     )
-    asyncio.run(do_register(
-        handle=args.handle,
-        phone=args.phone,
-        otp_code=args.otp_code,
-        invite_code=args.invite_code,
-        name=args.name,
-        credential_name=args.credential,
-    ))
+    try:
+        asyncio.run(do_register(
+            handle=args.handle,
+            phone=args.phone,
+            otp_code=args.otp_code,
+            invite_code=args.invite_code,
+            name=args.name,
+            credential_name=args.credential,
+        ))
+    except ValueError as exc:
+        parser.exit(status=2, message=f"Error: {exc}\n")
 
 
 if __name__ == "__main__":

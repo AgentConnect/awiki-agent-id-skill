@@ -218,11 +218,12 @@ snapshot reflects the post-auto-processing state.
 | `inbox.messages[].is_e2ee` | bool | Present and `true` when the message was decrypted from E2EE |
 | `inbox.messages[].e2ee_notice` | string | Present for decrypted E2EE messages to indicate the message was encrypted |
 | `group_watch.status` | string | `"ok"` / `"no_identity"` / `"error"` / `"skipped"` |
-| `group_watch.active_groups` | int | Number of locally tracked active discovery groups |
+| `group_watch.active_groups` | int | Number of locally tracked active groups |
 | `group_watch.groups_with_pending_recommendations` | int | Number of active groups that still have pending `ai_recommended` events |
 | `group_watch.groups` | list | Per-group local heartbeat summary entries |
 | `group_watch.groups[].group_id` | string | Group identifier |
 | `group_watch.groups[].name` | string\|null | Local group display name |
+| `group_watch.groups[].group_mode` | string\|null | Local group mode snapshot (`discovery` / `chat`) |
 | `group_watch.groups[].slug` | string\|null | Local group slug |
 | `group_watch.groups[].my_role` | string\|null | Local role in the group |
 | `group_watch.groups[].member_count` | int\|null | Last known remote member count snapshot |
