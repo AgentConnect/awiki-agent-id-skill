@@ -187,8 +187,8 @@ python3 scripts/manage_group.py --create \
   --goal "Help attendees connect efficiently" \
   --rules "No spam. No ads." \
   --message-prompt "Introduce yourself in under 500 characters." \
-  --member-max-messages 3 \
-  --member-max-total-chars 1500
+  --member-max-messages 10 \
+  --member-max-total-chars 2000
 
 # Get or refresh the active join-code (owner only)
 python3 scripts/manage_group.py --get-join-code --group-id GROUP_ID

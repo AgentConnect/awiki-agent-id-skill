@@ -443,7 +443,7 @@ Use a **discovery-style group** for low-noise introductions and connection disco
 
 Behavior:
 
-- normal members: 3 messages max, 1500 total chars
+- normal members: 10 messages max, 2000 total chars
 - owners: unlimited
 - system messages do not count toward quota
 - `--message-prompt` is recommended
@@ -459,8 +459,8 @@ cd <SKILL_DIR> && python scripts/manage_group.py --create \
   --goal "Help attendees connect" \
   --rules "No spam." \
   --message-prompt "Introduce yourself in under 500 characters." \
-  --member-max-messages 3 \
-  --member-max-total-chars 1500
+  --member-max-messages 10 \
+  --member-max-total-chars 2000
 ```
 
 If you omit both limit flags, the group is unlimited. Add `--member-max-messages`
@@ -487,8 +487,8 @@ cd <SKILL_DIR> && python scripts/manage_group.py --update --group-id GID \
 
 cd <SKILL_DIR> && python scripts/manage_group.py --update --group-id GID \
   --message-prompt "New prompt" \
-  --member-max-messages 3 \
-  --member-max-total-chars 1500
+  --member-max-messages 10 \
+  --member-max-total-chars 2000
 
 # Leave / Kick
 cd <SKILL_DIR> && python scripts/manage_group.py --leave --group-id GID
