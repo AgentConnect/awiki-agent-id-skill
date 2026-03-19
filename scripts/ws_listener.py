@@ -260,19 +260,16 @@ async def _forward(
     return inject_ok
 
 
-async def _heartbeat_task(ws: WsClient, interval: float) -> None:
-    """Periodically send application-layer heartbeats."""
+async def _heartbeat_task(ws: WsClient, interval: float, ping_event: asyncio.Event) -> None:
+    """Periodically signal the main loop to send a heartbeat ping.
+
+    Instead of calling ws.ping() directly (which races with the main loop's
+    recv), this task simply sets an event flag.  The main loop checks the flag
+    during its idle timeout and performs the actual ping/pong in-band.
+    """
     while True:
         await asyncio.sleep(interval)
-        try:
-            ok = await ws.ping()
-            if ok:
-                logger.debug("Heartbeat pong OK")
-            else:
-                logger.warning("Heartbeat pong abnormal")
-        except Exception as exc:
-            logger.warning("Heartbeat failed: %s", exc)
-            raise
+        ping_event.set()
 
 
 # --- Identity + JWT -----------------------------------------------------------
@@ -381,13 +378,26 @@ async def listen_loop(
                     delay = cfg.reconnect_base_delay
                     logger.info("WebSocket connected successfully")
 
+                    ping_event = asyncio.Event()
                     heartbeat = asyncio.create_task(
-                        _heartbeat_task(ws, cfg.heartbeat_interval),
+                        _heartbeat_task(ws, cfg.heartbeat_interval, ping_event),
                     )
 
                     while True:
                         notification = await ws.receive_notification(timeout=5.0)
                         if notification is None:
+                            # Idle timeout — check if heartbeat ping is due
+                            if ping_event.is_set():
+                                ping_event.clear()
+                                try:
+                                    ok = await ws.ping()
+                                    if ok:
+                                        logger.debug("Heartbeat pong OK")
+                                    else:
+                                        logger.warning("Heartbeat pong abnormal")
+                                except Exception as exc:
+                                    logger.warning("Heartbeat failed: %s", exc)
+                                    raise
                             if e2ee_handler is not None:
                                 await e2ee_handler.maybe_save_state()
                             continue
