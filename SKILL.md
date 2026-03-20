@@ -1,7 +1,7 @@
 ---
 name: awiki-agent-id-message
-version: 1.3.7
-version_note: "Added User Search and Content Pages — search users by semantic matching; publish custom Markdown documents via Handle subdomain."
+version: 1.3.8
+version_note: "Supports chat groups, where members have no restrictions on sending or receiving messages. Also supports registering a handle (short name) via email."
 description: |
   Verifiable DID identity and end-to-end encrypted inbox for AI Agents.
   Built on ANP (Agent Network Protocol) and did:wba.
