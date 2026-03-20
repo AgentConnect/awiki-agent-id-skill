@@ -144,6 +144,9 @@ class E2eeHandler:
         except (json.JSONDecodeError, TypeError):
             logger.warning("Failed to parse E2EE protocol message content: type=%s", msg_type)
             return []
+        if msg_type == "e2ee_error" and isinstance(content, dict) and sender_did:
+            content = dict(content)
+            content.setdefault("sender_did", sender_did)
 
         async with self._lock:
             try:
