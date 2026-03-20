@@ -785,7 +785,12 @@ async def summarize_inbox(
 async def _build_inbox_report_with_auto_e2ee(
     credential_name: str = "default",
 ) -> dict[str, Any]:
-    """Fetch inbox, auto-handle E2EE, and return the surfaced messages."""
+    """Fetch inbox, auto-handle E2EE, and return the surfaced messages.
+
+    When the real-time WebSocket listener is running, E2EE processing is
+    skipped here to avoid state conflicts (the listener already handles
+    E2EE in real time and owns the session state file).
+    """
     config = SDKConfig()
     auth_result = create_authenticator(credential_name, config)
     if auth_result is None:
@@ -797,6 +802,14 @@ async def _build_inbox_report_with_auto_e2ee(
             "text_by_sender": {},
             "messages": [],
         }
+
+    # Check if ws_listener is running — if so, skip E2EE processing
+    listener_running = False
+    try:
+        from service_manager import get_service_manager
+        listener_running = get_service_manager().status().get("running", False)
+    except Exception:
+        pass
 
     auth, data = auth_result
     try:
@@ -817,117 +830,124 @@ async def _build_inbox_report_with_auto_e2ee(
             processed_id_set: set[str] = set()
             rendered_decrypted_messages: list[dict[str, Any]] = []
 
-            for message in messages:
-                msg_type = str(message.get("type") or "")
-                if msg_type not in _E2EE_MSG_TYPES:
-                    continue
+            if listener_running:
+                # ws_listener owns E2EE state — skip processing to avoid
+                # state conflicts (race condition on session seq numbers).
+                logger.info(
+                    "ws_listener is running, skipping E2EE inbox processing"
+                )
+            else:
+                for message in messages:
+                    msg_type = str(message.get("type") or "")
+                    if msg_type not in _E2EE_MSG_TYPES:
+                        continue
 
-                sender_did = str(message.get("sender_did") or "")
-                try:
-                    content = (
-                        json.loads(message.get("content"))
-                        if isinstance(message.get("content"), str)
-                        else message.get("content", {})
-                    )
-                except (TypeError, json.JSONDecodeError):
-                    logger.warning(
-                        "Skipping malformed E2EE inbox payload type=%s sender=%s",
-                        msg_type,
-                        sender_did,
-                    )
-                    continue
-
-                if msg_type == "e2ee_msg":
+                    sender_did = str(message.get("sender_did") or "")
                     try:
-                        original_type, plaintext = e2ee_client.decrypt_message(content)
-                        rendered_decrypted_messages.append(
-                            _decorate_user_visible_e2ee_message(
-                                message,
-                                original_type=original_type,
-                                plaintext=plaintext,
-                            )
+                        content = (
+                            json.loads(message.get("content"))
+                            if isinstance(message.get("content"), str)
+                            else message.get("content", {})
                         )
-                        if isinstance(message.get("id"), str) and message["id"]:
-                            processed_ids.append(message["id"])
-                            processed_id_set.add(message["id"])
-                    except Exception as exc:  # noqa: BLE001
-                        error_code, retry_hint = _classify_decrypt_error(exc)
-                        error_content = build_e2ee_error_content(
-                            error_code=error_code,
-                            session_id=content.get("session_id"),
-                            failed_msg_id=message.get("id"),
-                            failed_server_seq=message.get("server_seq"),
-                            retry_hint=retry_hint,
-                            required_e2ee_version=(
-                                SUPPORTED_E2EE_VERSION
-                                if error_code == "unsupported_version"
-                                else None
-                            ),
-                            message=build_e2ee_error_message(
-                                error_code,
+                    except (TypeError, json.JSONDecodeError):
+                        logger.warning(
+                            "Skipping malformed E2EE inbox payload type=%s sender=%s",
+                            msg_type,
+                            sender_did,
+                        )
+                        continue
+
+                    if msg_type == "e2ee_msg":
+                        try:
+                            original_type, plaintext = e2ee_client.decrypt_message(content)
+                            rendered_decrypted_messages.append(
+                                _decorate_user_visible_e2ee_message(
+                                    message,
+                                    original_type=original_type,
+                                    plaintext=plaintext,
+                                )
+                            )
+                            if isinstance(message.get("id"), str) and message["id"]:
+                                processed_ids.append(message["id"])
+                                processed_id_set.add(message["id"])
+                        except Exception as exc:  # noqa: BLE001
+                            error_code, retry_hint = _classify_decrypt_error(exc)
+                            error_content = build_e2ee_error_content(
+                                error_code=error_code,
+                                session_id=content.get("session_id"),
+                                failed_msg_id=message.get("id"),
+                                failed_server_seq=message.get("server_seq"),
+                                retry_hint=retry_hint,
                                 required_e2ee_version=(
                                     SUPPORTED_E2EE_VERSION
                                     if error_code == "unsupported_version"
                                     else None
                                 ),
-                                detail=str(exc),
-                            ),
+                                message=build_e2ee_error_message(
+                                    error_code,
+                                    required_e2ee_version=(
+                                        SUPPORTED_E2EE_VERSION
+                                        if error_code == "unsupported_version"
+                                        else None
+                                    ),
+                                    detail=str(exc),
+                                ),
+                            )
+                            await _send_msg(
+                                client,
+                                data["did"],
+                                sender_did,
+                                "e2ee_error",
+                                error_content,
+                                auth=auth,
+                                credential_name=credential_name,
+                            )
+                            logger.warning(
+                                "Failed to auto-decrypt E2EE inbox message sender=%s error=%s",
+                                sender_did,
+                                exc,
+                            )
+                        continue
+
+                    try:
+                        if msg_type == "e2ee_error":
+                            record_remote_failure(
+                                credential_name=credential_name,
+                                peer_did=sender_did,
+                                content=content,
+                            )
+                        responses = await e2ee_client.process_e2ee_message(msg_type, content)
+                        session_ready = True
+                        terminal_error_notified = any(
+                            response_type == "e2ee_error"
+                            for response_type, _ in responses
                         )
-                        await _send_msg(
-                            client,
-                            data["did"],
-                            sender_did,
-                            "e2ee_error",
-                            error_content,
-                            auth=auth,
-                            credential_name=credential_name,
-                        )
+                        if msg_type in _E2EE_SESSION_SETUP_TYPES:
+                            session_ready = e2ee_client.has_session_id(
+                                content.get("session_id")
+                            )
+                        for response_type, response_content in responses:
+                            await _send_msg(
+                                client,
+                                data["did"],
+                                sender_did,
+                                response_type,
+                                response_content,
+                                auth=auth,
+                                credential_name=credential_name,
+                            )
+
+                        if session_ready or terminal_error_notified:
+                            if isinstance(message.get("id"), str) and message["id"]:
+                                processed_ids.append(message["id"])
+                                processed_id_set.add(message["id"])
+                    except Exception as exc:  # noqa: BLE001
                         logger.warning(
-                            "Failed to auto-decrypt E2EE inbox message sender=%s error=%s",
+                            "E2EE auto-processing failed type=%s sender=%s error=%s",
+                            msg_type,
                             sender_did,
                             exc,
                         )
-                    continue
-
-                try:
-                    if msg_type == "e2ee_error":
-                        record_remote_failure(
-                            credential_name=credential_name,
-                            peer_did=sender_did,
-                            content=content,
-                        )
-                    responses = await e2ee_client.process_e2ee_message(msg_type, content)
-                    session_ready = True
-                    terminal_error_notified = any(
-                        response_type == "e2ee_error"
-                        for response_type, _ in responses
-                    )
-                    if msg_type in _E2EE_SESSION_SETUP_TYPES:
-                        session_ready = e2ee_client.has_session_id(
-                            content.get("session_id")
-                        )
-                    for response_type, response_content in responses:
-                        await _send_msg(
-                            client,
-                            data["did"],
-                            sender_did,
-                            response_type,
-                            response_content,
-                            auth=auth,
-                            credential_name=credential_name,
-                        )
-
-                    if session_ready or terminal_error_notified:
-                        if isinstance(message.get("id"), str) and message["id"]:
-                            processed_ids.append(message["id"])
-                            processed_id_set.add(message["id"])
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning(
-                        "E2EE auto-processing failed type=%s sender=%s error=%s",
-                        msg_type,
-                        sender_did,
-                        exc,
-                    )
 
             if processed_ids:
                 await authenticated_rpc_call(
@@ -939,7 +959,8 @@ async def _build_inbox_report_with_auto_e2ee(
                     credential_name=credential_name,
                 )
 
-            _save_e2ee_client(e2ee_client, credential_name)
+            if not listener_running:
+                _save_e2ee_client(e2ee_client, credential_name)
 
         remaining_messages = [
             message
@@ -1038,6 +1059,27 @@ async def check_status(
         report["e2ee_sessions"] = {"active": active_count}
     else:
         report["e2ee_sessions"] = {"active": 0}
+
+    # 5. Real-time listener status
+    try:
+        from service_manager import get_service_manager
+        mgr_status = get_service_manager().status()
+        listener_report: dict[str, Any] = {
+            "installed": mgr_status.get("installed", False),
+            "running": mgr_status.get("running", False),
+        }
+        if not mgr_status.get("installed", False):
+            listener_report["hint"] = (
+                "Run: python scripts/setup_realtime.py --credential "
+                + credential_name
+            )
+        report["realtime_listener"] = listener_report
+    except Exception:
+        report["realtime_listener"] = {
+            "installed": False,
+            "running": False,
+            "hint": "Run: python scripts/setup_realtime.py",
+        }
 
     return report
 

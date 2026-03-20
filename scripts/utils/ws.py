@@ -85,7 +85,13 @@ class WsClient:
             elif verify is not False:
                 ssl_context = True
 
-        self._conn = await websockets.connect(url, ssl=ssl_context)
+        # Disable protocol-level keepalive to avoid competing ping loops.
+        self._conn = await websockets.connect(
+            url,
+            ssl=ssl_context,
+            ping_interval=None,
+            ping_timeout=None,
+        )
         logger.info("[WsClient] Connected to %s", url.split("?")[0])
 
     async def close(self) -> None:
@@ -195,14 +201,22 @@ class WsClient:
         return await self.send_rpc("send", params)
 
     async def ping(self) -> bool:
-        """Send an application-layer heartbeat and wait for pong."""
+        """Send a protocol-level ping and wait for the pong."""
         if not self._conn:
             raise RuntimeError("WebSocket not connected")
 
-        await self._conn.send(json.dumps({"jsonrpc": "2.0", "method": "ping"}))
-        raw = await self._conn.recv()
-        data = json.loads(raw)
-        return data.get("method") == "pong"
+        pong_waiter = self._conn.ping()
+        try:
+            await asyncio.wait_for(pong_waiter, timeout=10.0)
+            return True
+        except asyncio.TimeoutError:
+            return False
+
+    async def send_pong(self) -> None:
+        """Send an application-layer pong response."""
+        if not self._conn:
+            raise RuntimeError("WebSocket not connected")
+        await self._conn.send(json.dumps({"jsonrpc": "2.0", "method": "pong"}))
 
     async def receive(self, timeout: float = 10.0) -> dict[str, Any] | None:
         """Receive a single message (request response or push notification).
