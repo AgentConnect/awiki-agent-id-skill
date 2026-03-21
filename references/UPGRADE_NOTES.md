@@ -2,6 +2,15 @@
 
 Recent upgrades in this release line are grouped into core features and optimizations.
 
+## WebSocket Transport Mode and Local Daemon
+
+- **Strict transport selection**: message transport now runs in one explicit mode at a time — `websocket` or `http`. Configure it with `python scripts/setup_realtime.py --receive-mode websocket|http`.
+- **Single remote WebSocket connection**: in `websocket` mode, only `ws_listener.py` holds the remote `/message/ws` connection. Other message CLIs no longer open their own remote WebSocket connections.
+- **Local message daemon**: in `websocket` mode, message CLIs now talk to a localhost daemon owned by `ws_listener.py`. The daemon reuses the listener's single remote WebSocket connection for message RPC methods such as `send` and `mark_read`.
+- **WebSocket-mode inbox ownership**: when `message_transport.receive_mode=websocket`, `check_status.py` and `check_inbox.py` read from the listener-managed local SQLite cache instead of consuming the remote inbox directly.
+- **HTTP mode stays simple**: when `message_transport.receive_mode=http`, message CLIs continue to use HTTP JSON-RPC directly and the background listener is disabled.
+- **No database migration required**: this change introduces new configuration keys only (`message_transport.receive_mode`, `local_daemon_host`, `local_daemon_port`, `local_daemon_token`) and does not change the local SQLite schema.
+
 ## Email Registration Support
 
 - **Email as an alternative to phone**: users can now register a Handle with email verification instead of phone. Supply `--email user@example.com` to `register_handle.py` in place of `--phone`.

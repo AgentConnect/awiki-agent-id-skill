@@ -1,26 +1,29 @@
 # WebSocket Listener — Real-time Message Delivery
 
-Messages can be delivered via two transport channels: **HTTP RPC** (request/response polling) and **WebSocket** (real-time push). Both support plaintext and E2EE encrypted messages.
+Messages can be delivered via two transport channels: **HTTP RPC** (request/response polling) and **WebSocket** (real-time push). Both support plaintext and E2EE encrypted messages, but the client now runs in **one explicit transport mode at a time**.
 
 The WebSocket Listener provides instant message delivery (<1s latency) and transparent E2EE handling (protocol messages auto-processed, encrypted messages decrypted before forwarding). However, **it currently does not support Feishu (Lark) channel** — if you use Feishu as your messaging frontend, use HTTP heartbeat polling instead.
 
-## Dual Transport Architecture
+## Transport Modes
 
-| Transport | Direction | Latency | E2EE Support | Best for |
-|-----------|-----------|---------|-------------|----------|
-| **WebSocket** | Server → Agent push | Real-time (< 1s) | Full transparent handling | Real-time collaboration (not supported on Feishu channel) |
-| **HTTP RPC** | Agent → Server request | Immediate | Via CLI scripts | Sending messages, inbox queries, on-demand operations |
+| Mode | Remote Transport | Inbox Owner | Best for |
+|------|------------------|-------------|----------|
+| **`websocket`** | A single long-lived `/message/ws` connection | `ws_listener.py` | Real-time collaboration and transparent E2EE |
+| **`http`** | Direct HTTP JSON-RPC calls | HTTP CLI scripts | Simpler request/response workflows and environments without the background listener |
 
-Both channels work together: the WebSocket listener receives incoming messages in real-time, while HTTP RPC scripts are used for sending messages and querying state. You do not need to choose one — use both.
+In `websocket` mode, the listener owns the **only remote WebSocket connection**. Other message CLIs talk to a localhost daemon exposed by the listener instead of opening their own remote WebSocket connections. In `http` mode, the listener is disabled and message CLIs use HTTP JSON-RPC directly.
 
 ## Choose Your Approach
 
 | Approach | Latency | E2EE | Complexity | Best for |
 |----------|---------|------|------------|----------|
-| **WebSocket Listener** | Real-time (< 1s) | Transparent handling | Needs service install | High-volume, time-sensitive, or E2EE scenarios (not supported on Feishu channel) |
-| **Heartbeat (HTTPS)** | Up to 15 min | Manual processing | None — already set up above | Universal — works with all channels including Feishu |
+| **WebSocket mode** | Real-time (< 1s) | Transparent handling | Needs service install | High-volume, time-sensitive, or E2EE scenarios (not supported on Feishu channel) |
+| **HTTP mode** | On demand / heartbeat | Manual processing | No listener required | Universal — works with all channels including Feishu |
 
-Choose based on your needs. You can use both simultaneously — the listener provides instant delivery and E2EE, while the heartbeat handles status checks and JWT refresh.
+Choose one mode explicitly:
+
+- `python scripts/setup_realtime.py --receive-mode websocket`
+- `python scripts/setup_realtime.py --receive-mode http`
 
 ## Routing Modes
 
@@ -96,21 +99,27 @@ Both sides use `Authorization: Bearer <token>` for authentication. A mismatch wi
 mkdir -p <DATA_DIR>/config
 cp <SKILL_DIR>/service/settings.example.json <DATA_DIR>/config/settings.json
 ```
-Edit `<DATA_DIR>/config/settings.json` and set `listener.webhook_token` to the token generated above (see [Prerequisites](#prerequisites-openclaw-webhook-configuration)).
+Edit `<DATA_DIR>/config/settings.json`, set `listener.webhook_token` to the token generated above, and choose `message_transport.receive_mode` (see [Prerequisites](#prerequisites-openclaw-webhook-configuration)).
 
-**Step 2: Install and start the listener**
+**Step 2: Install the selected mode**
 ```bash
-cd <SKILL_DIR> && python scripts/ws_listener.py install --credential default
+cd <SKILL_DIR> && python scripts/setup_realtime.py --receive-mode websocket
 ```
 
-The listener auto-reads `<DATA_DIR>/config/settings.json` when no `--config` is specified.
+For pure HTTP mode:
+
+```bash
+cd <SKILL_DIR> && python scripts/setup_realtime.py --receive-mode http
+```
+
+When `receive_mode=websocket`, the listener auto-reads `<DATA_DIR>/config/settings.json`, starts the background service, and also starts the localhost daemon that proxies message RPC for other CLIs.
 
 **Step 3: Verify it's running**
 ```bash
 cd <SKILL_DIR> && python scripts/ws_listener.py status
 ```
 
-That's it! The listener is now running as a background service. It will auto-start on login and auto-restart if it crashes.
+That's it! In `websocket` mode, the listener now runs as a background service, auto-starts on login, auto-restarts if it crashes, and owns the only remote WebSocket connection.
 
 ## Management Commands
 
@@ -157,6 +166,12 @@ Edit `<DATA_DIR>/config/settings.json`:
   "user_service_url": "https://awiki.ai",
   "molt_message_url": "https://awiki.ai",
   "did_domain": "awiki.ai",
+  "message_transport": {
+    "receive_mode": "websocket",
+    "local_daemon_host": "127.0.0.1",
+    "local_daemon_port": 18790,
+    "local_daemon_token": "your-local-daemon-token"
+  },
   "listener": {
     "mode": "smart",
     "agent_webhook_url": "http://127.0.0.1:18789/hooks/agent",
@@ -174,6 +189,8 @@ Edit `<DATA_DIR>/config/settings.json`:
   }
 }
 ```
+
+`message_transport.receive_mode=http` disables the listener path and keeps message RPC on direct HTTP.
 
 Configuration priority: CLI `--mode` > environment variables > `--config` file > `settings.json` > defaults.
 
@@ -222,6 +239,6 @@ Auth header: `Authorization: Bearer <webhook_token>` (must match OpenClaw `hooks
 When using the WebSocket Listener alongside the heartbeat protocol:
 
 - The listener handles E2EE transparently: protocol messages (init/rekey/error) are processed internally, encrypted messages are decrypted and forwarded as plaintext to webhooks
-- `check_status.py` remains the primary heartbeat tool for identity, inbox summary, and JWT refresh
-- If unread encrypted messages remain after auto-processing, use `e2ee_messaging.py --process --peer <DID>` as a recovery path
+- In `websocket` mode, `check_status.py` and `check_inbox.py` read the listener-managed local cache instead of consuming the remote inbox directly
+- In `http` mode, `e2ee_messaging.py --process --peer <DID>` remains a valid manual recovery path
 - The listener complements the heartbeat — it does not replace `check_status.py`
