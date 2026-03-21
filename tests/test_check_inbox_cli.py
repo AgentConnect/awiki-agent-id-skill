@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import sys
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -38,6 +39,37 @@ class _DummyAsyncClient:
 
 class TestCheckInboxCli:
     """Test inbox CLI parsing and group-aware routing."""
+
+    def test_check_inbox_uses_local_cache_in_websocket_mode(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr(
+            check_inbox_cli,
+            "create_authenticator",
+            lambda credential_name, config: (object(), {"did": "did:alice"}),
+        )
+        monkeypatch.setattr(check_inbox_cli, "is_websocket_mode", lambda config: True)
+        monkeypatch.setattr(check_inbox_cli, "_listener_running", lambda: True)
+        monkeypatch.setattr(
+            check_inbox_cli,
+            "_load_local_messages",
+            lambda **kwargs: [
+                {
+                    "id": "msg-1",
+                    "type": "text",
+                    "sender_did": "did:bob",
+                    "content": "hello",
+                }
+            ],
+        )
+
+        asyncio.run(check_inbox_cli.check_inbox("alice", 5, "all", False))
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["source"] == "local_ws_cache"
+        assert payload["messages"][0]["content"] == "hello"
 
     def test_filter_messages_by_scope_variants(self) -> None:
         messages = [

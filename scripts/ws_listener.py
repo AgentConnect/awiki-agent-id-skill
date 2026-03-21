@@ -2,10 +2,11 @@
 """WebSocket listener: long-running background process that receives molt-message pushes and routes to webhooks.
 
 [INPUT]: credential_store (DID identity), SDKConfig, WsClient, ListenerConfig,
-         E2eeHandler, service_manager, local_store, logging_config
+         E2eeHandler, service_manager, local_store, logging_config, local daemon settings
 [OUTPUT]: WebSocket -> OpenClaw TUI bridge (chat.inject RPC for instant display,
-          HTTP webhook fallback) + cross-platform service lifecycle
-          management + local SQLite message/group persistence
+          HTTP webhook fallback) + localhost message daemon for CLI message RPC
+          proxying + cross-platform service lifecycle management + local SQLite
+          message/group persistence
 [POS]: Standalone background process with cross-platform service management (launchd / systemd / Task Scheduler), reuses utils/ core tool layer
 
 [PROTOCOL]:
@@ -14,6 +15,7 @@
 
 Core pipeline:
   molt-message WS push -> listener receives -> E2EE intercept/decrypt -> route classification -> chat.inject to TUI
+  local CLI RPC -> localhost daemon -> single remote WsClient.send_rpc() connection
 
 Subcommands:
   run       Run in foreground (for debugging)
@@ -47,7 +49,6 @@ if _scripts_dir not in sys.path:
 import httpx
 
 from check_inbox import (
-    MESSAGE_RPC,
     _auto_process_e2ee_messages,
     _message_sort_key,
     _store_inbox_messages,
@@ -60,16 +61,33 @@ from credential_layout import (
 )
 from e2ee_handler import E2eeHandler
 from listener_config import ROUTING_MODES, ListenerConfig
+from message_daemon import LocalMessageDaemon, load_local_daemon_settings
+from message_transport import is_websocket_mode
 from utils.config import SDKConfig
 from utils.identity import DIDIdentity
-from utils.client import create_molt_message_client
-from utils.rpc import authenticated_rpc_call
 from utils.logging_config import configure_logging
 from utils.ws import WsClient
 
 import local_store
 
 logger = logging.getLogger("ws_listener")
+
+
+class _ActiveWsRpcProxy:
+    """Proxy local daemon requests to the currently connected WsClient."""
+
+    def __init__(self) -> None:
+        self._ws: WsClient | None = None
+
+    def set_client(self, ws: WsClient | None) -> None:
+        """Update the active WsClient reference."""
+        self._ws = ws
+
+    async def call(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Forward one message RPC request to the active remote WsClient."""
+        if self._ws is None:
+            raise RuntimeError("Remote WebSocket transport is not connected")
+        return await self._ws.send_rpc(method, params)
 
 
 # --- Utility Functions --------------------------------------------------------
@@ -353,32 +371,19 @@ async def _catch_up_inbox(
     my_did: str,
     cfg: ListenerConfig,
     config: SDKConfig,
+    ws: WsClient,
     http: httpx.AsyncClient,
     local_db: Any,
     channels: list[tuple[str, str]] | None = None,
 ) -> None:
     """Fetch unread inbox messages after reconnect and forward them."""
-    auth_result = create_authenticator(credential_name, config)
-    if auth_result is None:
-        logger.warning("Inbox catch-up skipped: credential '%s' not found", credential_name)
-        return
-    auth, _ = auth_result
-
     since = _load_inbox_sync_since(credential_name, config)
     params: dict[str, Any] = {"user_did": my_did, "limit": 50}
     if since:
         params["since"] = since
 
     try:
-        async with create_molt_message_client(config) as client:
-            inbox = await authenticated_rpc_call(
-                client,
-                MESSAGE_RPC,
-                "get_inbox",
-                params=params,
-                auth=auth,
-                credential_name=credential_name,
-            )
+        inbox = await ws.send_rpc("get_inbox", params)
     except Exception as exc:
         logger.warning("Inbox catch-up failed: %s", exc)
         return
@@ -433,7 +438,13 @@ async def _catch_up_inbox(
     if not to_process:
         return
 
-    rendered_messages, _, _ = await _auto_process_e2ee_messages(
+    auth_result = create_authenticator(credential_name, config)
+    if auth_result is None:
+        logger.warning("Inbox catch-up E2EE processing skipped: credential '%s' not found", credential_name)
+        return
+    auth, _ = auth_result
+
+    rendered_messages, processed_ids, _ = await _auto_process_e2ee_messages(
         to_process,
         local_did=my_did,
         auth=auth,
@@ -454,7 +465,38 @@ async def _catch_up_inbox(
         )
         await _forward(http, cfg.wake_webhook_url, cfg.webhook_token, msg, route, cfg, channels, msg_seq)
 
+    read_ids = [
+        str(msg_id)
+        for msg_id in {
+            *(msg.get("id") or msg.get("msg_id") for msg in to_process),
+            *processed_ids,
+        }
+        if isinstance(msg_id, str) and msg_id
+    ]
+    if read_ids:
+        try:
+            await ws.send_rpc("mark_read", {"user_did": my_did, "message_ids": read_ids})
+        except Exception:
+            logger.debug("Failed to mark catch-up inbox messages as read", exc_info=True)
+
     # Cursor already advanced above.
+
+
+async def _mark_message_read(
+    ws: WsClient,
+    my_did: str,
+    message_id: str | None,
+) -> None:
+    """Mark one inbox message as read over WebSocket RPC."""
+    if not message_id:
+        return
+    try:
+        await ws.send_rpc(
+            "mark_read",
+            {"user_did": my_did, "message_ids": [message_id]},
+        )
+    except Exception:
+        logger.debug("Failed to mark WebSocket-delivered message as read", exc_info=True)
 
 
 async def _fetch_external_channels() -> list[tuple[str, str]]:
@@ -691,10 +733,15 @@ async def listen_loop(
     credential_name: str,
     cfg: ListenerConfig,
     config: SDKConfig | None = None,
+    rpc_proxy: _ActiveWsRpcProxy | None = None,
 ) -> None:
     """Main listen loop. Infinite loop: connect -> receive -> classify -> forward, with automatic reconnection."""
     if config is None:
         config = SDKConfig()
+    if not is_websocket_mode(config):
+        raise RuntimeError(
+            "WebSocket listener cannot run while message_transport.receive_mode=http"
+        )
 
     delay = cfg.reconnect_base_delay
 
@@ -743,6 +790,8 @@ async def listen_loop(
             heartbeat: asyncio.Task | None = None
             try:
                 async with WsClient(config, identity) as ws:
+                    if rpc_proxy is not None:
+                        rpc_proxy.set_client(ws)
                     delay = cfg.reconnect_base_delay
                     logger.info("WebSocket connected successfully")
 
@@ -773,6 +822,7 @@ async def listen_loop(
                         my_did,
                         cfg,
                         config,
+                        ws,
                         http,
                         local_db,
                         ext_channels,
@@ -842,6 +892,11 @@ async def listen_loop(
                         params = notification.get("params", {})
                         msg_type = params.get("type", "text")
                         sender_did = params.get("sender_did", "")
+                        incoming_msg_id = (
+                            str(params.get("id"))
+                            if isinstance(params.get("id"), str) and params.get("id")
+                            else None
+                        )
                         msg_seq += 1
                         content_preview = str(params.get("content", ""))[:80]
                         logger.info(
@@ -871,6 +926,7 @@ async def listen_loop(
                                             msg_type=resp_type,
                                         )
                                 await e2ee_handler.force_save_state()
+                                await _mark_message_read(ws, my_did, incoming_msg_id)
                                 continue
 
                             if msg_type == "e2ee_msg":
@@ -892,6 +948,7 @@ async def listen_loop(
                                         _truncate_did(sender_did),
                                     )
                                     await e2ee_handler.maybe_save_state()
+                                    await _mark_message_read(ws, my_did, incoming_msg_id)
                                     continue
                                 params = result.params
                                 logger.info(
@@ -984,6 +1041,7 @@ async def listen_loop(
                                 msg_seq, _truncate_did(params.get("sender_did", "")),
                                 params.get("type", ""),
                             )
+                            await _mark_message_read(ws, my_did, incoming_msg_id)
                             continue
 
                         # All routes now use /hooks/wake to inject into main session
@@ -1013,6 +1071,7 @@ async def listen_loop(
                                 logger.info("External channels empty (on-demand refresh)")
                             last_channel_refresh = time.monotonic()
                         await _forward(http, url, cfg.webhook_token, params, route, cfg, ext_channels, msg_seq)
+                        await _mark_message_read(ws, my_did, incoming_msg_id)
 
             except asyncio.CancelledError:
                 if e2ee_handler is not None:
@@ -1023,6 +1082,8 @@ async def listen_loop(
             except Exception as exc:
                 logger.warning("Connection lost: %s, reconnecting in %.0fs", exc, delay)
             finally:
+                if rpc_proxy is not None:
+                    rpc_proxy.set_client(None)
                 if heartbeat and not heartbeat.done():
                     heartbeat.cancel()
                     try:
@@ -1103,8 +1164,30 @@ def cmd_run(args: argparse.Namespace) -> None:
     if sys.platform != "win32":
         signal.signal(signal.SIGTERM, _shutdown)
 
+    runtime_config = SDKConfig.load()
+    rpc_proxy = _ActiveWsRpcProxy()
+    daemon_settings = load_local_daemon_settings(runtime_config)
+    local_daemon = LocalMessageDaemon(daemon_settings, rpc_proxy.call)
+
+    async def _run_listener() -> None:
+        await local_daemon.start()
+        logger.info(
+            "Local message daemon started at %s:%d",
+            daemon_settings.host,
+            daemon_settings.port,
+        )
+        try:
+            await listen_loop(
+                args.credential,
+                cfg,
+                config=runtime_config,
+                rpc_proxy=rpc_proxy,
+            )
+        finally:
+            await local_daemon.close()
+
     try:
-        task = loop.create_task(listen_loop(args.credential, cfg))
+        task = loop.create_task(_run_listener())
         loop.run_until_complete(task)
     except (asyncio.CancelledError, KeyboardInterrupt):
         logger.info("Listener stopped")

@@ -44,6 +44,7 @@ from utils.e2ee import (
 from utils.logging_config import configure_logging
 from credential_store import create_authenticator, load_identity
 from e2ee_store import save_e2ee_state, load_e2ee_state
+from message_transport import is_websocket_mode, message_rpc_call
 from e2ee_outbox import (
     begin_send_attempt,
     get_record,
@@ -185,6 +186,12 @@ async def _send_msg(
     }
     if title is not None:
         params["title"] = title
+    if client is None:
+        return await message_rpc_call(
+            "send",
+            params=params,
+            credential_name=credential_name,
+        )
     return await authenticated_rpc_call(
         client, MESSAGE_RPC, "send",
         params=params,
@@ -208,9 +215,20 @@ async def initiate_handshake(
     e2ee_client = _load_or_create_e2ee_client(data["did"], credential_name)
     msg_type, content = await e2ee_client.initiate_handshake(peer_did)
 
-    async with create_molt_message_client(config) as client:
-        await _send_msg(client, data["did"], peer_did, msg_type, content,
-                        auth=auth, credential_name=credential_name)
+    if is_websocket_mode(config):
+        await _send_msg(
+            None,
+            data["did"],
+            peer_did,
+            msg_type,
+            content,
+            auth=auth,
+            credential_name=credential_name,
+        )
+    else:
+        async with create_molt_message_client(config) as client:
+            await _send_msg(client, data["did"], peer_did, msg_type, content,
+                            auth=auth, credential_name=credential_name)
 
     _save_e2ee_client(e2ee_client, credential_name)
 
@@ -242,7 +260,10 @@ async def send_encrypted(
     # Auto-handshake if session is missing or expired
     init_msgs = await e2ee_client.ensure_active_session(peer_did)
 
-    async with create_molt_message_client(config) as client:
+    client = None
+    if not is_websocket_mode(config):
+        client = await create_molt_message_client(config).__aenter__()
+    try:
         if init_msgs:
             print(_render_auto_session_notice(peer_did))
         for init_type, init_content in init_msgs:
@@ -297,6 +318,9 @@ async def send_encrypted(
             client_msg_id=send_client_msg_id,
             title=title,
         )
+    finally:
+        if client is not None:
+            await client.__aexit__(None, None, None)
 
     # Save state (send_seq incremented)
     _save_e2ee_client(e2ee_client, credential_name)
@@ -316,6 +340,12 @@ async def process_inbox(
     auth_result = create_authenticator(credential_name, config)
     if auth_result is None:
         print(f"Credential '{credential_name}' unavailable; please create an identity first")
+        sys.exit(1)
+    if is_websocket_mode(config):
+        print(
+            "WebSocket receive mode is enabled; the background listener owns E2EE inbox processing. "
+            "Use check_status/check_inbox or switch to HTTP mode for manual --process."
+        )
         sys.exit(1)
 
     auth, data = auth_result

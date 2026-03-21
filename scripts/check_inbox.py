@@ -57,6 +57,7 @@ from utils.logging_config import configure_logging
 from credential_store import create_authenticator, load_identity
 from e2ee_outbox import record_remote_failure
 from e2ee_store import load_e2ee_state, save_e2ee_state
+from message_transport import is_websocket_mode, message_rpc_call
 from utils.e2ee import (
     SUPPORTED_E2EE_VERSION,
     build_e2ee_error_content,
@@ -172,6 +173,86 @@ def _filter_messages_by_scope(
     if scope == "group":
         return [msg for msg in messages if msg.get("group_id")]
     return [msg for msg in messages if not msg.get("group_id")]
+
+
+def _listener_running() -> bool:
+    """Return whether the background listener service is currently running."""
+    try:
+        from service_manager import get_service_manager
+
+        return bool(get_service_manager().status().get("running", False))
+    except Exception:
+        return False
+
+
+def _load_local_messages(
+    *,
+    owner_did: str,
+    limit: int,
+    scope: str = "all",
+    peer_did: str | None = None,
+    group_id: str | None = None,
+    incoming_only: bool = True,
+) -> list[dict[str, Any]]:
+    """Load messages from local SQLite for WebSocket-owned inbox mode."""
+    conn = local_store.get_connection()
+    try:
+        local_store.ensure_schema(conn)
+        conditions = ["m.owner_did = ?"]
+        args: list[Any] = [owner_did]
+        if peer_did:
+            conditions.append("(m.sender_did = ? OR m.receiver_did = ?)")
+            args.extend([peer_did, peer_did])
+        if group_id:
+            conditions.append("m.group_id = ?")
+            args.append(group_id)
+        if incoming_only:
+            conditions.append("m.direction = 0")
+        if scope == "group":
+            conditions.append("m.group_id IS NOT NULL")
+        elif scope == "direct":
+            conditions.append("m.group_id IS NULL")
+        rows = conn.execute(
+            f"""
+            SELECT
+                m.msg_id AS id,
+                m.sender_did,
+                m.sender_name,
+                m.receiver_did,
+                m.group_id,
+                m.group_did,
+                g.name AS group_name,
+                m.content_type AS type,
+                m.content,
+                m.title,
+                m.server_seq,
+                m.sent_at,
+                m.stored_at AS created_at,
+                m.is_read,
+                m.is_e2ee
+            FROM messages m
+            LEFT JOIN groups g
+              ON g.owner_did = m.owner_did
+             AND g.group_id = m.group_id
+            WHERE {" AND ".join(conditions)}
+            ORDER BY COALESCE(m.server_seq, -1) DESC,
+                     COALESCE(m.sent_at, m.stored_at) DESC,
+                     m.stored_at DESC
+            LIMIT ?
+            """,
+            [*args, limit],
+        ).fetchall()
+    finally:
+        conn.close()
+
+    messages: list[dict[str, Any]] = []
+    for row in rows:
+        message = _strip_hidden_user_fields(dict(row))
+        if int(message.get("is_e2ee") or 0):
+            message["_e2ee"] = True
+            message["_e2ee_notice"] = _E2EE_USER_NOTICE
+        messages.append(message)
+    return messages
 
 
 def _parse_group_history_target(target: str) -> str | None:
@@ -435,6 +516,47 @@ async def check_inbox(
         sys.exit(1)
 
     auth, data = auth_result
+    if is_websocket_mode(config):
+        if not _listener_running():
+            print(
+                "WebSocket receive mode is enabled, but the background listener is not running. "
+                "Run `python scripts/setup_realtime.py --receive-mode websocket` first."
+            )
+            sys.exit(1)
+        messages = _load_local_messages(
+            owner_did=data["did"],
+            limit=limit,
+            scope=scope,
+        )
+        if mark_read:
+            message_ids = _collect_readable_message_ids(
+                messages,
+                local_did=str(data["did"]),
+            )
+            if message_ids:
+                await message_rpc_call(
+                    "mark_read",
+                    {
+                        "user_did": data["did"],
+                        "message_ids": message_ids,
+                    },
+                    credential_name=credential_name,
+                    config=config,
+                )
+                _mark_local_messages_read(
+                    credential_name=credential_name,
+                    owner_did=str(data["did"]),
+                    message_ids=message_ids,
+                )
+        inbox = {
+            "messages": messages,
+            "total": len(messages),
+            "scope": scope,
+            "source": "local_ws_cache",
+        }
+        print(json.dumps(inbox, indent=2, ensure_ascii=False))
+        return
+
     async with create_molt_message_client(config) as client:
         inbox = await authenticated_rpc_call(
             client,
@@ -502,6 +624,27 @@ async def get_history(
         sys.exit(1)
 
     auth, data = auth_result
+    if is_websocket_mode(config):
+        if not _listener_running():
+            print(
+                "WebSocket receive mode is enabled, but the background listener is not running. "
+                "Run `python scripts/setup_realtime.py --receive-mode websocket` first."
+            )
+            sys.exit(1)
+        messages = _load_local_messages(
+            owner_did=data["did"],
+            limit=limit,
+            peer_did=peer_did,
+            incoming_only=False,
+        )
+        history = {
+            "messages": messages,
+            "total": len(messages),
+            "source": "local_ws_cache",
+        }
+        print(json.dumps(history, indent=2, ensure_ascii=False))
+        return
+
     async with create_molt_message_client(config) as client:
         history = await authenticated_rpc_call(
             client,
@@ -590,26 +733,23 @@ async def mark_read(
         print(f"Credential '{credential_name}' unavailable; please create an identity first")
         sys.exit(1)
 
-    auth, data = auth_result
-    async with create_molt_message_client(config) as client:
-        result = await authenticated_rpc_call(
-            client,
-            MESSAGE_RPC,
-            "mark_read",
-            params={
-                "user_did": data["did"],
-                "message_ids": message_ids,
-            },
-            auth=auth,
-            credential_name=credential_name,
-        )
-        _mark_local_messages_read(
-            credential_name=credential_name,
-            owner_did=str(data["did"]),
-            message_ids=message_ids,
-        )
-        print("Marked as read successfully:", file=sys.stderr)
-        print(json.dumps(result, indent=2, ensure_ascii=False))
+    _auth, data = auth_result
+    result = await message_rpc_call(
+        "mark_read",
+        params={
+            "user_did": data["did"],
+            "message_ids": message_ids,
+        },
+        credential_name=credential_name,
+        config=config,
+    )
+    _mark_local_messages_read(
+        credential_name=credential_name,
+        owner_did=str(data["did"]),
+        message_ids=message_ids,
+    )
+    print("Marked as read successfully:", file=sys.stderr)
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 def _mark_local_messages_read(

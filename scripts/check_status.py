@@ -50,6 +50,7 @@ from database_migration import ensure_local_database_ready
 from credential_store import load_identity, create_authenticator
 from e2ee_store import load_e2ee_state, save_e2ee_state
 from e2ee_outbox import record_remote_failure
+from message_transport import is_websocket_mode
 
 
 MESSAGE_RPC = "/message/rpc"
@@ -209,6 +210,78 @@ def _build_visible_inbox_report(
         "text_by_sender": text_by_sender,
         "messages": ordered_messages[:_INBOX_MESSAGE_LIMIT],
     }
+
+
+def _build_local_inbox_report(owner_did: str | None) -> dict[str, Any]:
+    """Build one inbox report from local SQLite cache only."""
+    if not owner_did:
+        return {
+            "status": "no_identity",
+            "total": 0,
+            "by_type": {},
+            "text_messages": 0,
+            "text_by_sender": {},
+            "messages": [],
+        }
+    try:
+        conn = local_store.get_connection()
+        try:
+            local_store.ensure_schema(conn)
+            rows = conn.execute(
+                """
+                SELECT
+                    m.msg_id AS id,
+                    m.sender_did,
+                    m.sender_name,
+                    m.receiver_did,
+                    m.group_id,
+                    m.group_did,
+                    g.name AS group_name,
+                    m.content_type AS type,
+                    m.content,
+                    m.server_seq,
+                    m.sent_at,
+                    m.stored_at AS created_at,
+                    m.is_e2ee
+                FROM messages m
+                LEFT JOIN groups g
+                  ON g.owner_did = m.owner_did
+                 AND g.group_id = m.group_id
+                WHERE m.owner_did = ?
+                  AND m.direction = 0
+                ORDER BY COALESCE(m.server_seq, -1) DESC,
+                         COALESCE(m.sent_at, m.stored_at) DESC,
+                         m.stored_at DESC
+                LIMIT ?
+                """,
+                (owner_did, _INBOX_FETCH_LIMIT),
+            ).fetchall()
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "status": "error",
+            "error": str(exc),
+            "total": 0,
+            "by_type": {},
+            "text_messages": 0,
+            "text_by_sender": {},
+            "messages": [],
+        }
+
+    visible_messages: list[dict[str, Any]] = []
+    for row in rows:
+        message = dict(row)
+        msg_type = str(message.get("type") or "")
+        if not _is_user_visible_message_type(msg_type):
+            continue
+        if int(message.get("is_e2ee") or 0):
+            message["is_e2ee"] = True
+            message["e2ee_notice"] = _E2EE_USER_NOTICE
+        visible_messages.append(message)
+    report = _build_visible_inbox_report(visible_messages)
+    report["source"] = "local_ws_cache"
+    return report
 
 
 def summarize_group_watch(owner_did: str | None) -> dict[str, Any]:
@@ -812,6 +885,17 @@ async def _build_inbox_report_with_auto_e2ee(
         pass
 
     auth, data = auth_result
+    if is_websocket_mode(config):
+        if not listener_running:
+            return {
+                "status": "listener_unavailable",
+                "total": 0,
+                "by_type": {},
+                "text_messages": 0,
+                "text_by_sender": {},
+                "messages": [],
+            }
+        return _build_local_inbox_report(data["did"])
     try:
         async with create_molt_message_client(config) as client:
             inbox = await authenticated_rpc_call(

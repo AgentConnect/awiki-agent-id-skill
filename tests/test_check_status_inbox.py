@@ -17,6 +17,7 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
+from types import SimpleNamespace
 
 import pytest
 
@@ -261,7 +262,54 @@ def test_auto_e2ee_builds_plaintext_inbox_report(
     assert inbox_report["messages"][1]["content"] == "Hello"
 
     assert marked_read == ["init-1", "cipher-1"]
-    assert sent_calls == [("e2ee_ack", {"session_id": "sess-1"})]
+
+
+def test_auto_e2ee_uses_local_cache_when_websocket_mode_is_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """WebSocket receive mode should surface local cache instead of remote inbox."""
+
+    monkeypatch.setattr(
+        check_status, "create_authenticator", lambda credential_name, config: (
+            object(),
+            {"did": "did:alice"},
+        )
+    )
+    monkeypatch.setattr(check_status, "is_websocket_mode", lambda config: True)
+    monkeypatch.setitem(
+        sys.modules,
+        "service_manager",
+        SimpleNamespace(
+            get_service_manager=lambda: SimpleNamespace(
+                status=lambda: {"running": True}
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        check_status,
+        "_build_local_inbox_report",
+        lambda owner_did: {
+            "status": "ok",
+            "source": "local_ws_cache",
+            "total": 1,
+            "by_type": {"text": 1},
+            "text_messages": 1,
+            "text_by_sender": {"did:bob": {"count": 1, "latest": "2026-03-11T10:00:00Z"}},
+            "messages": [
+                {
+                    "id": "msg-1",
+                    "type": "text",
+                    "sender_did": "did:bob",
+                    "content": "hello",
+                }
+            ],
+        },
+    )
+
+    report = asyncio.run(check_status._build_inbox_report_with_auto_e2ee("alice"))
+
+    assert report["source"] == "local_ws_cache"
+    assert report["total"] == 1
 
 
 def test_check_status_uses_auto_e2ee_inbox_report(

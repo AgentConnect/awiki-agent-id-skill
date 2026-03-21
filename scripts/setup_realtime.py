@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""One-click setup for real-time message delivery via WebSocket listener.
+"""One-click setup for message transport mode and real-time delivery.
 
 [INPUT]: SDKConfig, service_manager, credential_store, secrets, json
-[OUTPUT]: Configured settings.json + openclaw.json + HEARTBEAT.md + installed ws_listener service
+[OUTPUT]: Configured settings.json + openclaw.json + HEARTBEAT.md + installed or removed
+          ws_listener service according to the selected message transport mode
 [POS]: Automation script that bridges the gap between Skill installation and real-time
-       message delivery — configures OpenClaw hooks, listener settings, heartbeat checklist,
-       and background service
+       message delivery — configures transport mode, OpenClaw hooks, listener settings,
+       heartbeat checklist, and background service
 
 [PROTOCOL]:
 1. Update this header when logic changes
@@ -29,6 +30,8 @@ _scripts_dir = os.path.dirname(os.path.abspath(__file__))
 if _scripts_dir not in sys.path:
     sys.path.insert(0, _scripts_dir)
 
+from message_daemon import DEFAULT_LOCAL_DAEMON_HOST, DEFAULT_LOCAL_DAEMON_PORT
+from message_transport import RECEIVE_MODE_HTTP, RECEIVE_MODE_WEBSOCKET, write_receive_mode
 from service_manager import get_service_manager
 from utils.config import SDKConfig
 from utils.logging_config import configure_logging
@@ -45,6 +48,11 @@ _OPENCLAW_GATEWAY_PORT = 18789
 def _generate_token() -> str:
     """Generate a secure webhook token with awiki_ prefix."""
     return f"awiki_{secrets.token_hex(32)}"
+
+
+def _generate_local_daemon_token() -> str:
+    """Generate a secure token for localhost daemon requests."""
+    return f"awiki_local_{secrets.token_hex(24)}"
 
 
 def _is_placeholder_token(token: str) -> bool:
@@ -100,7 +108,22 @@ def _resolve_token(settings_data: dict[str, Any], openclaw_data: dict[str, Any])
     return _generate_token()
 
 
-def setup_settings(config: SDKConfig, token: str) -> dict[str, Any]:
+def _resolve_local_daemon_token(settings_data: dict[str, Any]) -> str:
+    """Resolve the local daemon token from settings or generate a new one."""
+    token = (
+        settings_data.get("message_transport", {}).get("local_daemon_token", "")
+    )
+    if token and not _is_placeholder_token(token):
+        return token
+    return _generate_local_daemon_token()
+
+
+def setup_settings(
+    config: SDKConfig,
+    token: str,
+    receive_mode: str,
+    local_daemon_token: str,
+) -> dict[str, Any]:
     """Create or update <DATA_DIR>/config/settings.json with listener config.
 
     Returns a status dict.
@@ -138,6 +161,19 @@ def setup_settings(config: SDKConfig, token: str) -> dict[str, Any]:
     listener.setdefault("e2ee_save_interval", 30.0)
     listener.setdefault("e2ee_decrypt_fail_action", "drop")
     data["listener"] = listener
+    data["message_transport"] = {
+        **data.get("message_transport", {}),
+        "receive_mode": receive_mode,
+        "local_daemon_host": data.get("message_transport", {}).get(
+            "local_daemon_host", DEFAULT_LOCAL_DAEMON_HOST
+        ),
+        "local_daemon_port": int(
+            data.get("message_transport", {}).get(
+                "local_daemon_port", DEFAULT_LOCAL_DAEMON_PORT
+            )
+        ),
+        "local_daemon_token": local_daemon_token,
+    }
 
     _save_json(settings_path, data)
 
@@ -208,6 +244,29 @@ def setup_listener_service(credential: str) -> dict[str, Any]:
         "status": "ok",
         "action": "installed",
         "detail": new_status,
+    }
+
+
+def disable_listener_service() -> dict[str, Any]:
+    """Stop and uninstall the ws_listener background service."""
+    mgr = get_service_manager()
+    current = mgr.status()
+    if not current.get("installed"):
+        return {
+            "status": "ok",
+            "action": "already_disabled",
+            "detail": current,
+        }
+    try:
+        if current.get("running"):
+            mgr.stop()
+    except Exception:
+        logger.debug("Failed to stop listener before uninstall", exc_info=True)
+    mgr.uninstall()
+    return {
+        "status": "ok",
+        "action": "disabled",
+        "detail": mgr.status(),
     }
 
 
@@ -299,20 +358,25 @@ def setup_heartbeat() -> dict[str, Any]:
     }
 
 
-def setup_realtime(credential_name: str = "default") -> dict[str, Any]:
-    """Run the full real-time setup pipeline.
+def setup_realtime(
+    credential_name: str = "default",
+    receive_mode: str = RECEIVE_MODE_WEBSOCKET,
+) -> dict[str, Any]:
+    """Run the full message transport setup pipeline.
 
     Steps:
     1. Resolve or generate webhook token
-    2. Create/update settings.json
+    2. Create/update settings.json with transport mode
     3. Create/update openclaw.json
-    4. Install/start ws_listener service
+    4. Install/start or disable ws_listener service
     5. Create/update HEARTBEAT.md in OpenClaw workspace
 
     Returns a JSON-serializable report.
     """
     config = SDKConfig()
     report: dict[str, Any] = {}
+    if receive_mode not in (RECEIVE_MODE_HTTP, RECEIVE_MODE_WEBSOCKET):
+        raise ValueError(f"Unsupported receive mode: {receive_mode}")
 
     # Load existing configs to resolve token
     settings_path = config.data_dir / "config" / "settings.json"
@@ -321,6 +385,7 @@ def setup_realtime(credential_name: str = "default") -> dict[str, Any]:
 
     # 1. Resolve token
     token = _resolve_token(settings_data, openclaw_data)
+    local_daemon_token = _resolve_local_daemon_token(settings_data)
     report["token_action"] = (
         "reused_existing" if token != _generate_token() else "generated_new"
     )
@@ -336,22 +401,45 @@ def setup_realtime(credential_name: str = "default") -> dict[str, Any]:
         report["token_action"] = "generated_new"
 
     # 2. Settings
-    report["settings"] = setup_settings(config, token)
+    report["settings"] = setup_settings(
+        config,
+        token,
+        receive_mode,
+        local_daemon_token,
+    )
+    write_receive_mode(
+        receive_mode,
+        config=config,
+        extra_transport_fields={
+            "local_daemon_host": DEFAULT_LOCAL_DAEMON_HOST,
+            "local_daemon_port": DEFAULT_LOCAL_DAEMON_PORT,
+            "local_daemon_token": local_daemon_token,
+        },
+    )
 
     # 3. OpenClaw hooks
     report["openclaw_hooks"] = setup_openclaw_hooks(token)
 
     # 4. Listener service
-    report["listener_service"] = setup_listener_service(credential_name)
+    if receive_mode == RECEIVE_MODE_WEBSOCKET:
+        report["listener_service"] = setup_listener_service(credential_name)
+    else:
+        report["listener_service"] = disable_listener_service()
 
     # 5. HEARTBEAT.md
     report["heartbeat"] = setup_heartbeat()
 
     report["status"] = "ok"
-    report["summary"] = (
-        "Real-time message delivery is now configured. "
-        "The WebSocket listener will receive messages instantly and forward them to OpenClaw."
-    )
+    if receive_mode == RECEIVE_MODE_WEBSOCKET:
+        report["summary"] = (
+            "Message transport is configured for WebSocket mode. "
+            "The WebSocket listener will receive messages instantly and forward them to OpenClaw."
+        )
+    else:
+        report["summary"] = (
+            "Message transport is configured for HTTP mode. "
+            "The background WebSocket listener is disabled and message inbox flows will use HTTP RPC."
+        )
 
     return report
 
@@ -366,9 +454,15 @@ def main() -> None:
         "--credential", default="default",
         help="Credential name (default: default)",
     )
+    parser.add_argument(
+        "--receive-mode",
+        choices=(RECEIVE_MODE_WEBSOCKET, RECEIVE_MODE_HTTP),
+        default=RECEIVE_MODE_WEBSOCKET,
+        help="Message receive mode (default: websocket)",
+    )
     args = parser.parse_args()
 
-    report = setup_realtime(args.credential)
+    report = setup_realtime(args.credential, args.receive_mode)
     print(json.dumps(report, indent=2, ensure_ascii=False))
 
 
