@@ -312,6 +312,100 @@ def test_auto_e2ee_uses_local_cache_when_websocket_mode_is_active(
     assert report["total"] == 1
 
 
+def test_auto_e2ee_uses_local_cache_when_foreground_daemon_is_alive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Foreground ws_listener should satisfy availability checks without a service."""
+
+    monkeypatch.setattr(
+        check_status, "create_authenticator", lambda credential_name, config: (
+            object(),
+            {"did": "did:alice"},
+        )
+    )
+    monkeypatch.setattr(check_status, "is_websocket_mode", lambda config: True)
+    monkeypatch.setitem(
+        sys.modules,
+        "service_manager",
+        SimpleNamespace(
+            get_service_manager=lambda: SimpleNamespace(
+                status=lambda: {"running": False}
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        check_status,
+        "is_local_daemon_available",
+        lambda config=None: True,
+    )
+    monkeypatch.setattr(
+        check_status,
+        "_build_local_inbox_report",
+        lambda owner_did: {
+            "status": "ok",
+            "source": "local_ws_cache",
+            "total": 1,
+            "by_type": {"text": 1},
+            "text_messages": 1,
+            "text_by_sender": {"did:bob": {"count": 1, "latest": "2026-03-11T10:00:00Z"}},
+            "messages": [{"id": "msg-1", "type": "text", "content": "hello"}],
+        },
+    )
+
+    report = asyncio.run(check_status._build_inbox_report_with_auto_e2ee("alice"))
+
+    assert report["status"] == "ok"
+    assert report["source"] == "local_ws_cache"
+
+
+def test_build_local_inbox_report_excludes_rows_marked_read(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Local websocket inbox summaries should only include unread incoming rows."""
+    monkeypatch.setenv("AWIKI_DATA_DIR", str(tmp_path))
+
+    conn = check_status.local_store.get_connection()
+    try:
+        check_status.local_store.ensure_schema(conn)
+        thread_id = check_status.local_store.make_thread_id(
+            "did:alice",
+            peer_did="did:bob",
+        )
+        check_status.local_store.store_message(
+            conn,
+            msg_id="unread-1",
+            owner_did="did:alice",
+            thread_id=thread_id,
+            direction=0,
+            sender_did="did:bob",
+            receiver_did="did:alice",
+            content_type="text",
+            content="hello",
+            credential_name="alice",
+        )
+        check_status.local_store.store_message(
+            conn,
+            msg_id="read-1",
+            owner_did="did:alice",
+            thread_id=thread_id,
+            direction=0,
+            sender_did="did:bob",
+            receiver_did="did:alice",
+            content_type="text",
+            content="old hello",
+            is_read=True,
+            credential_name="alice",
+        )
+    finally:
+        conn.close()
+
+    report = check_status._build_local_inbox_report("did:alice")
+
+    assert report["total"] == 1
+    assert [message["id"] for message in report["messages"]] == ["unread-1"]
+
+
 def test_check_status_uses_auto_e2ee_inbox_report(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

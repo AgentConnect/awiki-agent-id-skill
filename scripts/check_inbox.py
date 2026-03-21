@@ -24,7 +24,7 @@ Usage:
 
 [INPUT]: SDK (RPC calls), credential_store (load identity credentials), local_store,
          E2EE runtime helpers, group RPC history reads, outbox tracking,
-         logging_config
+         logging_config, local daemon availability probing
 [OUTPUT]: Inbox message list / private-or-group history / mark-read result,
           with optional auto-mark-read during inbox fetches, immediate private
           E2EE protocol processing, plaintext decryption when possible, local
@@ -57,6 +57,7 @@ from utils.logging_config import configure_logging
 from credential_store import create_authenticator, load_identity
 from e2ee_outbox import record_remote_failure
 from e2ee_store import load_e2ee_state, save_e2ee_state
+from message_daemon import is_local_daemon_available
 from message_transport import is_websocket_mode, message_rpc_call
 from utils.e2ee import (
     SUPPORTED_E2EE_VERSION,
@@ -175,14 +176,17 @@ def _filter_messages_by_scope(
     return [msg for msg in messages if not msg.get("group_id")]
 
 
-def _listener_running() -> bool:
+def _listener_running(config: SDKConfig | None = None) -> bool:
     """Return whether the background listener service is currently running."""
+    resolved = config or SDKConfig.load()
     try:
         from service_manager import get_service_manager
 
-        return bool(get_service_manager().status().get("running", False))
+        if bool(get_service_manager().status().get("running", False)):
+            return True
     except Exception:
-        return False
+        logger.debug("Failed to query listener service manager status", exc_info=True)
+    return is_local_daemon_available(config=resolved)
 
 
 def _load_local_messages(
@@ -208,6 +212,7 @@ def _load_local_messages(
             args.append(group_id)
         if incoming_only:
             conditions.append("m.direction = 0")
+            conditions.append("m.is_read = 0")
         if scope == "group":
             conditions.append("m.group_id IS NOT NULL")
         elif scope == "direct":
@@ -517,7 +522,7 @@ async def check_inbox(
 
     auth, data = auth_result
     if is_websocket_mode(config):
-        if not _listener_running():
+        if not _listener_running(config):
             print(
                 "WebSocket receive mode is enabled, but the background listener is not running. "
                 "Run `python scripts/setup_realtime.py --receive-mode websocket` first."
@@ -625,7 +630,7 @@ async def get_history(
 
     auth, data = auth_result
     if is_websocket_mode(config):
-        if not _listener_running():
+        if not _listener_running(config):
             print(
                 "WebSocket receive mode is enabled, but the background listener is not running. "
                 "Run `python scripts/setup_realtime.py --receive-mode websocket` first."
@@ -814,6 +819,8 @@ def _store_inbox_messages(
                 "title": msg.get("title"),
                 "server_seq": msg.get("server_seq"),
                 "sent_at": msg.get("sent_at") or msg.get("created_at"),
+                "is_e2ee": bool(msg.get("_e2ee") or msg.get("is_e2ee")),
+                "is_read": bool(msg.get("is_read")),
                 "sender_name": msg.get("sender_name"),
                 "metadata": (
                     json.dumps(
@@ -913,6 +920,8 @@ def _store_history_messages(
                 "title": msg.get("title"),
                 "server_seq": msg.get("server_seq"),
                 "sent_at": msg.get("sent_at") or msg.get("created_at"),
+                "is_e2ee": bool(msg.get("_e2ee") or msg.get("is_e2ee")),
+                "is_read": bool(msg.get("is_read")),
                 "sender_name": msg.get("sender_name"),
             })
         local_store.store_messages_batch(

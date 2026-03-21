@@ -1,8 +1,8 @@
 """Message transport selection and RPC helpers.
 
 [INPUT]: settings.json, credential_store, SDKConfig, HTTP RPC helpers, local daemon
-[OUTPUT]: receive-mode helpers plus message RPC call helpers over HTTP or the local
-          WebSocket-mode daemon
+[OUTPUT]: receive-mode helpers plus credential-aware message RPC call helpers
+          over HTTP or the local WebSocket-mode daemon
 [POS]: Shared transport abstraction for message-domain scripts, centralizing whether
        message RPC traffic should use direct HTTP JSON-RPC or the localhost daemon
        that owns the single remote WebSocket connection.
@@ -94,8 +94,12 @@ async def websocket_message_rpc_call(
 ) -> dict[str, Any]:
     """Call one message RPC method via the local WebSocket-mode daemon."""
     resolved = config or SDKConfig.load()
-    del credential_name
-    return await call_local_daemon(method, params, config=resolved)
+    return await call_local_daemon(
+        method,
+        params,
+        credential_name=credential_name,
+        config=resolved,
+    )
 
 
 async def message_rpc_call(

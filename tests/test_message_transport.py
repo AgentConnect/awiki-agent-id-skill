@@ -152,9 +152,14 @@ def test_websocket_transport_uses_local_daemon(tmp_path: Path) -> None:
 
         captured: dict[str, object] = {}
 
-        async def _handler(method: str, params: dict[str, object]) -> dict[str, object]:
+        async def _handler(
+            method: str,
+            params: dict[str, object],
+            credential_name: str,
+        ) -> dict[str, object]:
             captured["method"] = method
             captured["params"] = params
+            captured["credential_name"] = credential_name
             return {"id": "msg-1", "server_seq": 9}
 
         daemon = message_daemon.LocalMessageDaemon(
@@ -170,6 +175,7 @@ def test_websocket_transport_uses_local_daemon(tmp_path: Path) -> None:
             result = await message_transport.websocket_message_rpc_call(
                 "send",
                 {"content": "hello"},
+                credential_name="sender",
                 config=config,
             )
         finally:
@@ -178,5 +184,55 @@ def test_websocket_transport_uses_local_daemon(tmp_path: Path) -> None:
         assert result == {"id": "msg-1", "server_seq": 9}
         assert captured["method"] == "send"
         assert captured["params"] == {"content": "hello"}
+        assert captured["credential_name"] == "sender"
+
+    asyncio.run(_run())
+
+
+def test_local_daemon_timeout_is_wrapped_as_runtime_error(tmp_path: Path) -> None:
+    """Local daemon client should raise RuntimeError instead of raw TimeoutError."""
+
+    async def _run() -> None:
+        config = _build_config(tmp_path)
+        token = "daemon-token"
+        message_transport.write_receive_mode(
+            message_transport.RECEIVE_MODE_WEBSOCKET,
+            config=config,
+            extra_transport_fields={
+                "local_daemon_host": "127.0.0.1",
+                "local_daemon_port": 18882,
+                "local_daemon_token": token,
+            },
+        )
+
+        async def _slow_handler(
+            method: str,
+            params: dict[str, object],
+            credential_name: str,
+        ) -> dict[str, object]:
+            del method, params, credential_name
+            await asyncio.sleep(0.2)
+            return {"ok": True}
+
+        daemon = message_daemon.LocalMessageDaemon(
+            message_daemon.LocalDaemonSettings(
+                host="127.0.0.1",
+                port=18882,
+                token=token,
+            ),
+            _slow_handler,
+        )
+        await daemon.start()
+        try:
+            with pytest.raises(RuntimeError, match="timed out"):
+                await message_daemon.call_local_daemon(
+                    "send",
+                    {"content": "hello"},
+                    credential_name="default",
+                    config=config,
+                    timeout=0.05,
+                )
+        finally:
+            await daemon.close()
 
     asyncio.run(_run())

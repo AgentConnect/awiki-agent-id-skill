@@ -1,8 +1,9 @@
 """Local message transport daemon over localhost TCP.
 
 [INPUT]: asyncio stream server/client, settings.json transport config, one async
-         message RPC handler callable
-[OUTPUT]: LocalMessageDaemon server and helper functions to call it from CLI tools
+         message RPC handler callable, optional local availability probes
+[OUTPUT]: LocalMessageDaemon server plus helpers for CLI tools to call or probe
+          the localhost daemon with caller credential context
 [POS]: Local transport layer for WebSocket receive mode, ensuring all message CLI
        traffic goes through one local daemon that owns the single remote WSS link.
 
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import socket
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
@@ -22,7 +24,7 @@ from utils.config import SDKConfig
 
 DEFAULT_LOCAL_DAEMON_HOST = "127.0.0.1"
 DEFAULT_LOCAL_DAEMON_PORT = 18790
-_REQUEST_TIMEOUT_SECONDS = 15.0
+_REQUEST_TIMEOUT_SECONDS = 20.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +67,7 @@ async def call_local_daemon(
     method: str,
     params: dict[str, Any] | None = None,
     *,
+    credential_name: str = "default",
     config: SDKConfig | None = None,
     timeout: float = _REQUEST_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
@@ -82,6 +85,7 @@ async def call_local_daemon(
                 "token": settings.token,
                 "method": method,
                 "params": params or {},
+                "credential_name": credential_name,
             }
             writer.write((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
             await writer.drain()
@@ -100,10 +104,31 @@ async def call_local_daemon(
 
     try:
         return await asyncio.wait_for(_round_trip(), timeout=timeout)
+    except asyncio.TimeoutError as exc:
+        raise RuntimeError(
+            "Local message daemon request timed out while waiting for a credential WebSocket session"
+        ) from exc
     except OSError as exc:
         raise RuntimeError(
             "Local message daemon is unavailable; make sure `ws_listener` is running in websocket mode"
         ) from exc
+
+
+def is_local_daemon_available(
+    *,
+    config: SDKConfig | None = None,
+    timeout: float = 0.2,
+) -> bool:
+    """Return whether the localhost message daemon TCP port is reachable."""
+    settings = load_local_daemon_settings(config)
+    try:
+        with socket.create_connection(
+            (settings.host, settings.port),
+            timeout=timeout,
+        ):
+            return True
+    except OSError:
+        return False
 
 
 class LocalMessageDaemon:
@@ -112,7 +137,7 @@ class LocalMessageDaemon:
     def __init__(
         self,
         settings: LocalDaemonSettings,
-        handler: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]],
+        handler: Callable[[str, dict[str, Any], str], Awaitable[dict[str, Any]]],
     ) -> None:
         self._settings = settings
         self._handler = handler
@@ -164,6 +189,7 @@ class LocalMessageDaemon:
 
             method = request.get("method")
             params = request.get("params", {})
+            credential_name = request.get("credential_name", "default")
             if not isinstance(method, str) or not method:
                 await self._write_response(
                     writer,
@@ -178,8 +204,10 @@ class LocalMessageDaemon:
                     error={"message": "Local daemon params must be an object"},
                 )
                 return
+            if not isinstance(credential_name, str) or not credential_name:
+                credential_name = "default"
 
-            result = await self._handler(method, params)
+            result = await self._handler(method, params, credential_name)
             await self._write_response(writer, ok=True, result=result)
         except Exception as exc:  # noqa: BLE001
             await self._write_response(
@@ -215,5 +243,6 @@ __all__ = [
     "LocalDaemonSettings",
     "LocalMessageDaemon",
     "call_local_daemon",
+    "is_local_daemon_available",
     "load_local_daemon_settings",
 ]

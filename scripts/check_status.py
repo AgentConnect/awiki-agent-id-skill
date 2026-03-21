@@ -7,7 +7,7 @@ Usage:
 
 [INPUT]: SDK (RPC calls, E2eeClient), credential_store (authenticator factory),
          e2ee_store, credential_migration, database_migration, local_store,
-         logging_config
+         logging_config, local daemon availability probing
 [OUTPUT]: Structured JSON status report (local upgrade + identity + inbox +
           group_watch + e2ee_sessions), with automatic E2EE protocol handling,
           plaintext delivery for unread encrypted messages, and incremental
@@ -50,6 +50,7 @@ from database_migration import ensure_local_database_ready
 from credential_store import load_identity, create_authenticator
 from e2ee_store import load_e2ee_state, save_e2ee_state
 from e2ee_outbox import record_remote_failure
+from message_daemon import is_local_daemon_available
 from message_transport import is_websocket_mode
 
 
@@ -249,6 +250,7 @@ def _build_local_inbox_report(owner_did: str | None) -> dict[str, Any]:
                  AND g.group_id = m.group_id
                 WHERE m.owner_did = ?
                   AND m.direction = 0
+                  AND m.is_read = 0
                 ORDER BY COALESCE(m.server_seq, -1) DESC,
                          COALESCE(m.sent_at, m.stored_at) DESC,
                          m.stored_at DESC
@@ -882,7 +884,9 @@ async def _build_inbox_report_with_auto_e2ee(
         from service_manager import get_service_manager
         listener_running = get_service_manager().status().get("running", False)
     except Exception:
-        pass
+        logger.debug("Failed to query listener service manager status", exc_info=True)
+    if not listener_running:
+        listener_running = is_local_daemon_available(config=config)
 
     auth, data = auth_result
     if is_websocket_mode(config):

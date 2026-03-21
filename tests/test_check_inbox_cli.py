@@ -16,6 +16,7 @@ import json
 import sys
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -51,7 +52,7 @@ class TestCheckInboxCli:
             lambda credential_name, config: (object(), {"did": "did:alice"}),
         )
         monkeypatch.setattr(check_inbox_cli, "is_websocket_mode", lambda config: True)
-        monkeypatch.setattr(check_inbox_cli, "_listener_running", lambda: True)
+        monkeypatch.setattr(check_inbox_cli, "_listener_running", lambda config=None: True)
         monkeypatch.setattr(
             check_inbox_cli,
             "_load_local_messages",
@@ -70,6 +71,29 @@ class TestCheckInboxCli:
         payload = json.loads(capsys.readouterr().out)
         assert payload["source"] == "local_ws_cache"
         assert payload["messages"][0]["content"] == "hello"
+
+    def test_listener_running_detects_foreground_local_daemon(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        monkeypatch.setenv("AWIKI_DATA_DIR", str(tmp_path))
+        monkeypatch.setitem(
+            sys.modules,
+            "service_manager",
+            SimpleNamespace(
+                get_service_manager=lambda: SimpleNamespace(
+                    status=lambda: {"running": False}
+                )
+            ),
+        )
+        monkeypatch.setattr(
+            check_inbox_cli,
+            "is_local_daemon_available",
+            lambda config=None: True,
+        )
+
+        assert check_inbox_cli._listener_running(check_inbox_cli.SDKConfig()) is True
 
     def test_filter_messages_by_scope_variants(self) -> None:
         messages = [
@@ -574,3 +598,86 @@ class TestCheckInboxCli:
         payload = json.loads(capsys.readouterr().out)
         assert payload["total"] == 2
         assert marked_message_ids == ["cipher-1", "plain-1"]
+
+    def test_load_local_messages_excludes_rows_marked_read_from_inbox(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        monkeypatch.setenv("AWIKI_DATA_DIR", str(tmp_path))
+        conn = local_store.get_connection()
+        try:
+            local_store.ensure_schema(conn)
+            thread_id = local_store.make_thread_id("did:alice", peer_did="did:bob")
+            local_store.store_message(
+                conn,
+                msg_id="unread-1",
+                owner_did="did:alice",
+                thread_id=thread_id,
+                direction=0,
+                sender_did="did:bob",
+                receiver_did="did:alice",
+                content_type="text",
+                content="hello",
+                credential_name="alice",
+            )
+            local_store.store_message(
+                conn,
+                msg_id="read-1",
+                owner_did="did:alice",
+                thread_id=thread_id,
+                direction=0,
+                sender_did="did:bob",
+                receiver_did="did:alice",
+                content_type="text",
+                content="old hello",
+                is_read=True,
+                credential_name="alice",
+            )
+        finally:
+            conn.close()
+
+        messages = check_inbox_cli._load_local_messages(
+            owner_did="did:alice",
+            limit=10,
+            incoming_only=True,
+        )
+
+        assert [message["id"] for message in messages] == ["unread-1"]
+
+    def test_load_local_history_keeps_sent_encrypted_messages(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        monkeypatch.setenv("AWIKI_DATA_DIR", str(tmp_path))
+        conn = local_store.get_connection()
+        try:
+            local_store.ensure_schema(conn)
+            local_store.store_message(
+                conn,
+                msg_id="cipher-out-1",
+                owner_did="did:alice",
+                thread_id=local_store.make_thread_id("did:alice", peer_did="did:bob"),
+                direction=1,
+                sender_did="did:alice",
+                receiver_did="did:bob",
+                content_type="text",
+                content="secret hello",
+                is_e2ee=True,
+                credential_name="alice",
+            )
+        finally:
+            conn.close()
+
+        messages = check_inbox_cli._load_local_messages(
+            owner_did="did:alice",
+            limit=10,
+            peer_did="did:bob",
+            incoming_only=False,
+        )
+
+        assert len(messages) == 1
+        assert messages[0]["id"] == "cipher-out-1"
+        assert messages[0]["content"] == "secret hello"
+        assert messages[0]["_e2ee"] is True
