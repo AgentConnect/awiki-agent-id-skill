@@ -749,6 +749,13 @@ class TestExecuteSql:
         with pytest.raises(ValueError, match="Forbidden"):
             local_store.execute_sql(db, "DROP TABLE messages")
 
+    def test_reject_delete_without_where(self, db):
+        with pytest.raises(
+            ValueError,
+            match="Forbidden SQL operation: DELETE without WHERE clause is not allowed",
+        ):
+            local_store.execute_sql(db, "DELETE FROM messages")
+
     def test_allow_delete_with_where(self, db):
         local_store.store_message(
             db,

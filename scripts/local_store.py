@@ -2037,7 +2037,9 @@ def execute_sql(
 
     if re.match(r"\s*DELETE\b", stripped, re.IGNORECASE):
         if not re.search(r"\bWHERE\b", stripped, re.IGNORECASE):
-            raise ValueError("DELETE without WHERE clause is not allowed")
+            raise ValueError(
+                "Forbidden SQL operation: DELETE without WHERE clause is not allowed"
+            )
 
     cursor = conn.execute(stripped, params)
 
