@@ -413,6 +413,77 @@ async def register_handle_with_email(
     return identity
 
 
+async def register_handle_with_telegram(
+    client: httpx.AsyncClient,
+    config: SDKConfig,
+    telegram_user_id: str,
+    telegram_ticket: str,
+    handle: str,
+    telegram_bot_token: str | None = None,
+    invite_code: str | None = None,
+    name: str | None = None,
+    is_public: bool = False,
+    services: list[dict[str, Any]] | None = None,
+) -> DIDIdentity:
+    """One-stop Handle registration with Telegram: create identity -> register DID with Handle -> obtain JWT.
+
+    Telegram ticket must be obtained from the official Telegram Bot before calling this function.
+
+    Args:
+        client: HTTP client pointing to user-service.
+        config: SDK configuration.
+        telegram_user_id: Telegram user ID.
+        telegram_ticket: One-time ticket obtained from official Telegram Bot.
+        handle: Handle local-part (e.g., "alice").
+        telegram_bot_token: Optional bot token for Flow A (bot identity binding).
+        invite_code: Invite code (required for short handles <= 4 chars).
+        name: Display name.
+        is_public: Whether publicly visible.
+        services: Custom service entry list for DID document.
+
+    Returns:
+        DIDIdentity with user_id and jwt_token populated.
+
+    Raises:
+        JsonRpcError: When registration fails (invalid ticket, handle taken, etc).
+    """
+    # 1. Create key-bound DID identity with handle as path prefix
+    identity = create_identity(
+        hostname=config.did_domain,
+        path_prefix=[handle],
+        proof_purpose="authentication",
+        domain=config.did_domain,
+        services=services,
+    )
+
+    # 2. Register DID with Handle + Telegram parameters
+    payload: dict[str, Any] = {
+        "did_document": identity.did_document,
+        "handle": handle,
+        "telegram_user_id": telegram_user_id,
+        "telegram_ticket": telegram_ticket,
+    }
+    if telegram_bot_token is not None:
+        payload["telegram_bot_token"] = telegram_bot_token
+    if invite_code is not None:
+        payload["invite_code"] = invite_code
+    if name is not None:
+        payload["name"] = name
+    if is_public:
+        payload["is_public"] = True
+
+    reg_result = await rpc_call(client, DID_AUTH_RPC, "register", payload)
+    identity.user_id = reg_result["user_id"]
+
+    # 3. Registration returns access_token for handle mode
+    if reg_result.get("access_token"):
+        identity.jwt_token = reg_result["access_token"]
+    else:
+        identity.jwt_token = await get_jwt_via_wba(client, identity, config.did_domain)
+
+    return identity
+
+
 # ==================== Account binding functions ====================
 
 
@@ -586,6 +657,7 @@ __all__ = [
     "send_otp",
     "register_handle",
     "register_handle_with_email",
+    "register_handle_with_telegram",
     "send_email_verification",
     "check_email_verified",
     "ensure_email_verification",

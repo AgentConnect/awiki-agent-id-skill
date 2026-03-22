@@ -9,16 +9,19 @@ Usage:
     uv run python scripts/register_handle.py --handle alice --email user@example.com
     uv run python scripts/register_handle.py --handle alice --email user@example.com --wait-for-email-verification
 
+    # Register with Telegram (requires ticket from official Telegram Bot and bot_token)
+    uv run python scripts/register_handle.py --handle alice --telegram-user-id 123456789 --telegram-ticket TICKET_STRING --telegram-bot-token BOT_TOKEN
+
     # With invite code (for short handles <= 4 chars)
     uv run python scripts/register_handle.py --handle bob --phone +8613800138000 --otp-code 123456 --invite-code ABC123
 
     # Specify credential name
     uv run python scripts/register_handle.py --handle alice --phone +8613800138000 --otp-code 123456 --credential myhandle
 
-[INPUT]: SDK (handle registration, OTP, email verification), credential_store (save identity),
+[INPUT]: SDK (handle registration, OTP, email verification, Telegram ticket), credential_store (save identity),
          logging_config
 [OUTPUT]: Register Handle + DID identity and save credentials
-[POS]: Pure non-interactive CLI for Handle registration (phone OTP or email activation link)
+[POS]: Pure non-interactive CLI for Handle registration (phone OTP, email activation link, or Telegram ticket)
 
 [PROTOCOL]:
 1. Update this header when logic changes
@@ -35,6 +38,7 @@ from utils.cli_errors import exit_with_cli_error
 from utils.handle import (
     ensure_email_verification,
     register_handle_with_email,
+    register_handle_with_telegram,
 )
 from utils.logging_config import configure_logging
 from credential_store import save_identity
@@ -47,6 +51,9 @@ async def do_register(
     handle: str,
     phone: str | None = None,
     email: str | None = None,
+    telegram_user_id: str | None = None,
+    telegram_ticket: str | None = None,
+    telegram_bot_token: str | None = None,
     otp_code: str | None = None,
     invite_code: str | None = None,
     name: str | None = None,
@@ -57,12 +64,13 @@ async def do_register(
 ) -> bool:
     """Register a Handle with a pure non-interactive flow."""
     logger.info(
-        "Registering handle handle=%s credential=%s phone=%s email=%s "
+        "Registering handle handle=%s credential=%s phone=%s email=%s telegram=%s "
         "invite_code_present=%s wait_for_email_verification=%s",
         handle,
         credential_name,
         bool(phone),
         bool(email),
+        bool(telegram_user_id),
         bool(invite_code),
         wait_for_email_verification,
     )
@@ -94,8 +102,13 @@ async def do_register(
             identity = await _register_with_phone(
                 client, config, handle, phone, otp_code, invite_code, name,
             )
+        elif telegram_user_id:
+            identity = await _register_with_telegram(
+                client, config, handle, telegram_user_id, telegram_ticket,
+                telegram_bot_token, invite_code, name,
+            )
         else:
-            print("Error: either --phone or --email is required.")
+            print("Error: one of --phone, --email, or --telegram-user-id is required.")
             sys.exit(1)
 
         if identity is None:
@@ -192,6 +205,36 @@ async def _register_with_email(
     )
 
 
+async def _register_with_telegram(
+    client, config, handle, telegram_user_id, telegram_ticket,
+    telegram_bot_token, invite_code, name,
+):
+    """Telegram-based registration with ticket and bot_token (Flow A)."""
+    if telegram_ticket is None:
+        raise ValueError(
+            "Telegram ticket is required. "
+            "Please obtain a ticket from the official Telegram Bot first."
+        )
+    if telegram_bot_token is None:
+        raise ValueError(
+            "Bot token is required for Telegram registration. "
+            "This ensures bot identity verification and secure binding."
+        )
+
+    print(f"\nRegistering Handle '{handle}' with Telegram...")
+    return await register_handle_with_telegram(
+        client=client,
+        config=config,
+        telegram_user_id=telegram_user_id,
+        telegram_ticket=telegram_ticket,
+        telegram_bot_token=telegram_bot_token,
+        handle=handle,
+        invite_code=invite_code,
+        name=name or handle,
+        is_public=True,
+    )
+
+
 def main() -> None:
     configure_logging(console_level=None, mirror_stdio=True)
 
@@ -199,7 +242,7 @@ def main() -> None:
     parser.add_argument("--handle", required=True, type=str,
                         help="Handle local-part (e.g., alice)")
 
-    # Phone or email (mutually exclusive group)
+    # Phone, email, or Telegram (mutually exclusive group)
     auth_group = parser.add_mutually_exclusive_group(required=True)
     auth_group.add_argument("--phone", type=str,
                             help="Phone number in international format with country code "
@@ -207,9 +250,15 @@ def main() -> None:
                                  "China local 11-digit numbers are auto-prefixed with +86.")
     auth_group.add_argument("--email", type=str,
                             help="Email address (will send activation link if not yet verified)")
+    auth_group.add_argument("--telegram-user-id", type=str,
+                            help="Telegram user ID (requires --telegram-ticket)")
 
     parser.add_argument("--otp-code", type=str, default=None,
                         help="Pre-issued OTP code (phone mode only; required for non-interactive use)")
+    parser.add_argument("--telegram-ticket", type=str, default=None,
+                        help="One-time ticket from official Telegram Bot (Telegram mode only; required)")
+    parser.add_argument("--telegram-bot-token", type=str, default=None,
+                        help="Bot token for bot identity verification (Telegram mode only; required)")
     parser.add_argument("--invite-code", type=str, default=None,
                         help="Invite code (required for short handles <= 4 chars)")
     parser.add_argument("--name", type=str, default=None,
@@ -235,6 +284,14 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    # Validate Telegram mode requirements
+    if args.telegram_user_id:
+        if not args.telegram_ticket:
+            parser.error("--telegram-ticket is required when using --telegram-user-id")
+        if not args.telegram_bot_token:
+            parser.error("--telegram-bot-token is required when using --telegram-user-id")
+
     logger.info(
         "register_handle CLI started handle=%s credential=%s",
         args.handle,
@@ -246,6 +303,9 @@ def main() -> None:
                 handle=args.handle,
                 phone=args.phone,
                 email=args.email,
+                telegram_user_id=args.telegram_user_id,
+                telegram_ticket=args.telegram_ticket,
+                telegram_bot_token=args.telegram_bot_token,
                 otp_code=args.otp_code,
                 invite_code=args.invite_code,
                 name=args.name,

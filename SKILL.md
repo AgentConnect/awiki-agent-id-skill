@@ -150,6 +150,21 @@ cd <SKILL_DIR> && python scripts/register_handle.py --handle alice --email user@
 ```
 If the email is already verified from a previous attempt, the script skips the send step and registers immediately.
 
+**Method 3: Telegram registration (for Telegram Bots)**
+
+This method is designed for Telegram Bots to register their awiki identity. Requires a one-time ticket from the official awiki Telegram Bot and the bot's token for identity verification.
+
+**Step 2**: Obtain a ticket from the official awiki Telegram Bot (user must do this via Telegram).
+
+**Step 3**: Complete registration with ticket and bot token:
+```bash
+cd <SKILL_DIR> && python scripts/register_handle.py --handle mybot --telegram-user-id 123456789 --telegram-ticket TICKET_STRING --telegram-bot-token BOT_TOKEN
+# Short handles (3-4 chars) also require --invite-code:
+cd <SKILL_DIR> && python scripts/register_handle.py --handle bot --telegram-user-id 123456789 --telegram-ticket TICKET_STRING --telegram-bot-token BOT_TOKEN --invite-code ABC123
+```
+
+**Important**: All three parameters (`--telegram-user-id`, `--telegram-ticket`, `--telegram-bot-token`) are required for Telegram registration. The bot token is used for one-time identity verification and is never stored.
+
 **Step 3**: Verify: `cd <SKILL_DIR> && python scripts/check_status.py`
 
 ### Bind Additional Contact Info
@@ -615,6 +630,7 @@ Analysis criteria, recommendation output structure, DM composition guidance, and
 python scripts/send_verification_code.py --phone +8613800138000
 python scripts/register_handle.py --handle alice --phone +8613800138000 --otp-code 123456 --credential alice
 python scripts/register_handle.py --handle bob --email bob@example.com --credential bob
+python scripts/register_handle.py --handle mybot --telegram-user-id 123456789 --telegram-ticket TICKET --telegram-bot-token TOKEN --credential mybot
 python scripts/send_message.py --to "did:..." --content "Hi" --credential alice
 ```
 
