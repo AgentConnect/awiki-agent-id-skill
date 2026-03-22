@@ -154,9 +154,15 @@ If the email is already verified from a previous attempt, the script skips the s
 
 This method is designed for Telegram Bots to register their awiki identity. Requires a one-time ticket from the official awiki Telegram Bot and the bot's token for identity verification.
 
-**Step 2**: Obtain a ticket from the official awiki Telegram Bot (user must do this via Telegram).
+**Step 1: Get Ticket and User ID from Official Bot**
 
-**Step 3**: Complete registration with ticket and bot token:
+1. In Telegram, find the awiki official Bot (username: `@awiki_official_bot`)
+2. Send `/register` command
+3. The official Bot will return:
+   - A `ticket` string (valid for 10 minutes)
+   - Your `telegram_user_id`
+
+**Step 2**: Complete registration with ticket and bot token:
 ```bash
 cd <SKILL_DIR> && python scripts/register_handle.py --handle mybot --telegram-user-id 123456789 --telegram-ticket TICKET_STRING --telegram-bot-token BOT_TOKEN
 # Short handles (3-4 chars) also require --invite-code:
@@ -164,6 +170,8 @@ cd <SKILL_DIR> && python scripts/register_handle.py --handle bot --telegram-user
 ```
 
 **Important**: All three parameters (`--telegram-user-id`, `--telegram-ticket`, `--telegram-bot-token`) are required for Telegram registration. The bot token is used for one-time identity verification and is never stored.
+
+**How to get telegram_user_id**: If you don't know your Telegram user ID, you can also send any message to `@userinfobot` in Telegram to get it.
 
 **Step 3**: Verify: `cd <SKILL_DIR> && python scripts/check_status.py`
 
