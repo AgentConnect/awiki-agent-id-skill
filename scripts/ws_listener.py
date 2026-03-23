@@ -7,11 +7,13 @@
          settings, authenticated HTTP fallback for secondary credentials, and
          indexed credential discovery for newly created identities
 [OUTPUT]: WebSocket -> OpenClaw TUI bridge (chat.inject RPC for instant display,
-          HTTP webhook fallback) + localhost message daemon for CLI message RPC
-          proxying + cross-platform service lifecycle management + local SQLite
-          message/group persistence + conditional read acknowledgements only
-          after successful user-visible forwarding + runtime auto-enrollment of
-          newly created credentials into remote WebSocket sessions
+          HTTP webhook fallback, and fan-out to all active external channels)
+          + localhost message daemon for CLI message RPC proxying +
+          cross-platform service lifecycle management + local SQLite
+          message/group persistence + sender-handle-aware channel text
+          rendering + conditional read acknowledgements only after successful
+          user-visible forwarding + runtime auto-enrollment of newly created
+          credentials into remote WebSocket sessions
 [POS]: Standalone background process with cross-platform service management (launchd / systemd / Task Scheduler), reuses utils/ core tool layer
 
 [PROTOCOL]:
@@ -338,6 +340,7 @@ def _build_event_text(params: dict[str, Any], route: str, cfg: ListenerConfig) -
     """Build the system event text from message params."""
     sender_did = params.get("sender_did", "unknown")
     sender = _truncate_did(sender_did)
+    sender_handle = _build_sender_handle(params)
     content = str(params.get("content", ""))
     content_preview = content[:50]
     group_did = params.get("group_did")
@@ -348,6 +351,10 @@ def _build_event_text(params: dict[str, Any], route: str, cfg: ListenerConfig) -
         lines = [f"[Awiki New {context} Message{' (encrypted)' if params.get('_e2ee') else ''}]"]
         if params.get("sender_name"):
             lines.append(f"sender_name: {params['sender_name']}")
+        if sender_handle:
+            lines.append(f"sender_handle: {sender_handle}")
+        if sender_did:
+            lines.append(f"sender_did: {sender_did}")
         if group_did:
             lines.append(f"group_did: {group_did}")
         if params.get("group_name"):
@@ -363,7 +370,25 @@ def _build_event_text(params: dict[str, Any], route: str, cfg: ListenerConfig) -
         return f"[IM] {sender}: {content_preview}"
 
 
-_CHANNEL_ACTIVE_HOURS = 5  # only forward to channels active within this window
+def _build_sender_handle(params: dict[str, Any]) -> str | None:
+    """Return a normalized sender handle string for display when available."""
+    sender_handle = params.get("sender_handle")
+    if not isinstance(sender_handle, str):
+        return None
+    normalized_handle = sender_handle.strip()
+    if not normalized_handle:
+        return None
+    sender_handle_domain = params.get("sender_handle_domain")
+    if (
+        isinstance(sender_handle_domain, str)
+        and sender_handle_domain.strip()
+        and "." not in normalized_handle
+    ):
+        return f"{normalized_handle}.{sender_handle_domain.strip()}"
+    return normalized_handle
+
+
+_CHANNEL_ACTIVE_HOURS = 24  # only forward to channels active within this window
 _CHANNEL_CACHE_FILE_NAME = "external-channels.json"
 _INBOX_SYNC_FILE_NAME = "inbox-sync.json"
 
@@ -724,7 +749,8 @@ async def _fetch_external_channels() -> list[tuple[str, str]]:
 
     Returns list of (channel, target) tuples parsed from session keys.
     Only includes channels active within the last ``_CHANNEL_ACTIVE_HOURS`` hours.
-    Filters out TUI (key ends with :main) and hook sessions.
+    Filters out TUI (key ends with :main) and hook sessions, then deduplicates
+    by ``(channel, target)`` while keeping the most recently active entry first.
     """
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -749,8 +775,7 @@ async def _fetch_external_channels() -> list[tuple[str, str]]:
         data = json.loads(stdout_str[json_start:])
         now_ms = time.time() * 1000
         max_age_ms = _CHANNEL_ACTIVE_HOURS * 3600 * 1000
-        best_channel: tuple[str, str] | None = None
-        best_updated_at = -1.0
+        active_channels: dict[tuple[str, str], float] = {}
         for session in data.get("sessions", {}).get("recent", []):
             key = session.get("key", "")
             # Skip TUI and hook sessions
@@ -767,10 +792,15 @@ async def _fetch_external_channels() -> list[tuple[str, str]]:
             if len(parts) >= 5:
                 channel = parts[2]
                 target = ":".join(parts[4:])
-                if updated_at >= best_updated_at:
-                    best_updated_at = updated_at
-                    best_channel = (channel, target)
-        return [best_channel] if best_channel else []
+                channel_key = (channel, target)
+                previous_updated_at = active_channels.get(channel_key, -1.0)
+                if updated_at >= previous_updated_at:
+                    active_channels[channel_key] = updated_at
+        ordered_channels = sorted(
+            active_channels.items(),
+            key=lambda item: (-item[1], item[0][0], item[0][1]),
+        )
+        return [channel_key for channel_key, _ in ordered_channels]
     except FileNotFoundError:
         logger.warning("openclaw CLI not found at %s", _OPENCLAW_BIN)
         return []

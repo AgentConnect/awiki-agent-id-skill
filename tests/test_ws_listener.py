@@ -3,7 +3,8 @@
 [INPUT]: ws_listener helpers with monkeypatched auth, RPC, routing, and storage
 [OUTPUT]: Coverage for secondary-credential daemon sends, runtime credential
           discovery, paginated catch-up, normalized offline message
-          persistence, and read-mark gating on forwarding success
+          persistence, external-channel fan-out selection, sender metadata
+          rendering, and read-mark gating on forwarding success
 [POS]: WebSocket listener unit tests for daemon proxying and reconnect recovery
 
 [PROTOCOL]:
@@ -14,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -53,6 +55,90 @@ def _build_config(tmp_path: Path) -> SDKConfig:
         did_domain="example.com",
         credentials_dir=tmp_path / "credentials",
         data_dir=tmp_path / "data",
+    )
+
+
+def test_fetch_external_channels_returns_all_active_unique_channels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The listener should fan out to every active external channel, not just one."""
+
+    class _FakeProc:
+        def __init__(self, stdout_text: str) -> None:
+            self.returncode = 0
+            self._stdout = stdout_text.encode("utf-8")
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return self._stdout, b""
+
+    now_ms = 100_000_000
+    active_recent = {
+        "sessions": {
+            "recent": [
+                {
+                    "key": "agent:agent-2:telegram:user:chat-2",
+                    "updatedAt": now_ms - 2_000,
+                },
+                {
+                    "key": "agent:agent-1:feishu:user:open-id-1",
+                    "updatedAt": now_ms - 5_000,
+                },
+                {
+                    "key": "agent:agent-3:telegram:user:chat-2",
+                    "updatedAt": now_ms - 4_000,
+                },
+                {
+                    "key": "agent:agent-4:discord:user:room-9",
+                    "updatedAt": now_ms - 90_000_000,
+                },
+                {
+                    "key": "agent:main:main",
+                    "updatedAt": now_ms - 1_000,
+                },
+                {
+                    "key": "hook:ingress",
+                    "updatedAt": now_ms - 1_000,
+                },
+            ]
+        }
+    }
+
+    async def _fake_create_subprocess_exec(*args, **kwargs) -> _FakeProc:
+        del args, kwargs
+        return _FakeProc(f"log line before json\n{json.dumps(active_recent)}")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
+    monkeypatch.setattr(ws_listener.time, "time", lambda: now_ms / 1000)
+
+    result = asyncio.run(ws_listener._fetch_external_channels())
+
+    assert result == [
+        ("telegram", "chat-2"),
+        ("feishu", "open-id-1"),
+    ]
+
+
+def test_build_event_text_includes_sender_handle_and_did_for_agent_route() -> None:
+    """Agent-route notifications should include sender name, handle, and DID."""
+    text = ws_listener._build_event_text(
+        {
+            "sender_name": "卓诚",
+            "sender_handle": "zhuocheng",
+            "sender_handle_domain": "awiki.ai",
+            "sender_did": "did:wba:awiki.ai:user:k1_zhuocheng",
+            "content": "你好",
+        },
+        route="agent",
+        cfg=SimpleNamespace(),
+    )
+
+    assert text == (
+        "[Awiki New Direct Message]\n"
+        "sender_name: 卓诚\n"
+        "sender_handle: zhuocheng.awiki.ai\n"
+        "sender_did: did:wba:awiki.ai:user:k1_zhuocheng\n"
+        "\n"
+        "你好"
     )
 
 
