@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -171,8 +172,9 @@ def test_check_status_includes_group_watch_summary(
 
     async def _fake_build_inbox_report_with_auto_e2ee(
         credential_name: str,
+        listener_status: dict | None = None,
     ) -> dict[str, object]:
-        del credential_name
+        del credential_name, listener_status
         return {
             "status": "ok",
             "total": 0,
@@ -200,7 +202,13 @@ def test_check_status_includes_group_watch_summary(
         if owner_did == "did:alice"
         else {"status": "no_identity", "active_groups": 0, "groups": []},
     )
-    monkeypatch.setattr(check_status, "load_e2ee_state", lambda credential_name: None)
+    monkeypatch.setattr(
+        check_status,
+        "load_e2ee_client",
+        lambda local_did, credential_name: SimpleNamespace(
+            export_state=lambda: {"sessions": []},
+        ),
+    )
 
     async def _fake_fetch_group_messages(
         group_watch, *, owner_did, credential_name

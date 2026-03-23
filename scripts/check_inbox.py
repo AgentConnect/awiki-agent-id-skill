@@ -58,7 +58,7 @@ from utils import (
 from utils.logging_config import configure_logging
 from credential_store import create_authenticator, load_identity
 from e2ee_outbox import record_remote_failure
-from e2ee_store import load_e2ee_state, save_e2ee_state
+from e2ee_session_store import load_e2ee_client, save_e2ee_client
 from listener_recovery import ensure_listener_runtime
 from message_transport import is_websocket_mode, message_rpc_call
 from utils.e2ee import (
@@ -393,23 +393,8 @@ def _resolve_group_since_seq(
 
 
 def _load_or_create_e2ee_client(local_did: str, credential_name: str) -> E2eeClient:
-    """Load persisted E2EE state or create a fresh client."""
-    cred = load_identity(credential_name)
-    signing_pem: str | None = None
-    x25519_pem: str | None = None
-    if cred is not None:
-        signing_pem = cred.get("e2ee_signing_private_pem")
-        x25519_pem = cred.get("e2ee_agreement_private_pem")
-
-    state = load_e2ee_state(credential_name)
-    if state is not None and state.get("local_did") == local_did:
-        if signing_pem is not None:
-            state["signing_pem"] = signing_pem
-        if x25519_pem is not None:
-            state["x25519_pem"] = x25519_pem
-        return E2eeClient.from_state(state)
-
-    return E2eeClient(local_did, signing_pem=signing_pem, x25519_pem=x25519_pem)
+    """Load the latest disk-first E2EE state from SQLite."""
+    return load_e2ee_client(local_did, credential_name)
 
 
 async def _send_msg(http_client, sender_did, receiver_did, msg_type, content, *, auth, credential_name="default"):
@@ -553,7 +538,7 @@ async def _auto_process_e2ee_messages(
             else:
                 processed_ids.append(msg["id"])
 
-    save_e2ee_state(e2ee_client.export_state(), credential_name)
+    save_e2ee_client(e2ee_client, credential_name)
     return rendered_messages, processed_ids, e2ee_client
 
 

@@ -615,7 +615,11 @@ def test_check_status_uses_auto_e2ee_inbox_report(
             "last_restart_result": "failed",
         },
     )
-    monkeypatch.setattr(check_status, "load_e2ee_state", lambda credential_name: None)
+    monkeypatch.setattr(
+        check_status,
+        "load_e2ee_client",
+        lambda local_did, credential_name: _FakeE2eeClient(),
+    )
 
     report = asyncio.run(check_status.check_status("alice"))
 

@@ -6,8 +6,9 @@ Usage:
     python scripts/check_status.py --upgrade-only       # Run local upgrade and exit
 
 [INPUT]: SDK (RPC calls, E2eeClient), credential_store (authenticator factory),
-         e2ee_store, credential_migration, database_migration, local_store,
-         listener recovery helpers, logging_config
+         SQLite-backed E2EE session store, credential_migration,
+         database_migration, local_store, listener recovery helpers,
+         logging_config
 [OUTPUT]: Structured JSON status report (local upgrade + identity + inbox +
           group_watch + e2ee_sessions + realtime listener runtime), with
           automatic E2EE protocol handling, plaintext delivery for unread
@@ -49,7 +50,7 @@ import local_store
 from credential_migration import ensure_credential_storage_ready
 from database_migration import ensure_local_database_ready
 from credential_store import load_identity, create_authenticator
-from e2ee_store import load_e2ee_state, save_e2ee_state
+from e2ee_session_store import load_e2ee_client, save_e2ee_client
 from e2ee_outbox import record_remote_failure
 from listener_recovery import ensure_listener_runtime, get_listener_runtime_report
 from message_transport import is_websocket_mode
@@ -818,29 +819,13 @@ async def fetch_group_messages(
 
 
 def _load_or_create_e2ee_client(local_did: str, credential_name: str) -> E2eeClient:
-    """Load existing E2EE client state from disk, or create a new client if absent."""
-    # Load E2EE keys from credential
-    cred = load_identity(credential_name)
-    signing_pem: str | None = None
-    x25519_pem: str | None = None
-    if cred is not None:
-        signing_pem = cred.get("e2ee_signing_private_pem")
-        x25519_pem = cred.get("e2ee_agreement_private_pem")
-
-    state = load_e2ee_state(credential_name)
-    if state is not None and state.get("local_did") == local_did:
-        if signing_pem is not None:
-            state["signing_pem"] = signing_pem
-        if x25519_pem is not None:
-            state["x25519_pem"] = x25519_pem
-        return E2eeClient.from_state(state)
-
-    return E2eeClient(local_did, signing_pem=signing_pem, x25519_pem=x25519_pem)
+    """Load the latest disk-first E2EE state from SQLite."""
+    return load_e2ee_client(local_did, credential_name)
 
 
 def _save_e2ee_client(client: E2eeClient, credential_name: str) -> None:
-    """Save E2EE client state to disk."""
-    save_e2ee_state(client.export_state(), credential_name)
+    """Persist the latest E2EE state into SQLite."""
+    save_e2ee_client(client, credential_name)
 
 
 async def _send_msg(
@@ -1282,12 +1267,12 @@ async def check_status(
     )
 
     # 4. E2EE session status
-    e2ee_state = load_e2ee_state(credential_name)
-    if e2ee_state is not None:
-        sessions = e2ee_state.get("sessions", [])
-        active_count = len(sessions)
-        report["e2ee_sessions"] = {"active": active_count}
-    else:
+    try:
+        e2ee_client = load_e2ee_client(owner_did, credential_name)
+        report["e2ee_sessions"] = {
+            "active": len(e2ee_client.export_state().get("sessions", []))
+        }
+    except Exception:  # noqa: BLE001
         report["e2ee_sessions"] = {"active": 0}
 
     # 5. Real-time listener status
