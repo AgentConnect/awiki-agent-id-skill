@@ -118,3 +118,108 @@ def test_load_saved_identity_without_jwt_or_auth_files_requests_recreation(
         'uv run python scripts/setup_identity.py --name "Alice" --credential alice'
         in output
     )
+
+
+def test_delete_identity_refuses_when_ton_wallet_exists_without_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Deleting a credential with a TON wallet without --delete-ton-wallet should refuse to proceed."""  # noqa: E501
+
+    # Prepare fake credential layout with ton_wallet/wallet.enc
+    cred_dir = tmp_path / "cred_default"
+    ton_dir = cred_dir / "ton_wallet"
+    ton_dir.mkdir(parents=True, exist_ok=True)
+    wallet_file = ton_dir / "wallet.enc"
+    wallet_file.write_text("dummy", encoding="utf-8")
+
+    class _FakePaths:
+        def __init__(self, credential_dir: Path) -> None:
+            self.credential_dir = credential_dir
+
+    fake_paths = _FakePaths(credential_dir=cred_dir)
+
+    # resolve_credential_paths should return our fake paths for "default"
+    monkeypatch.setattr(
+        setup_identity,
+        "resolve_credential_paths",
+        lambda name: fake_paths if name == "default" else None,
+    )
+
+    # delete_identity must NOT be called in this case
+    called = {"delete_identity": False}
+
+    def _fake_delete_identity(name: str) -> bool:
+        called["delete_identity"] = True
+        return True
+
+    monkeypatch.setattr(setup_identity, "delete_identity", _fake_delete_identity)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "setup_identity.py",
+            "--delete",
+            "default",
+        ],
+    )
+
+    setup_identity.main()
+
+    out = capsys.readouterr().out
+    assert "Refusing to delete credential 'default'" in out
+    assert "--delete-ton-wallet" in out
+    assert called["delete_identity"] is False
+
+
+def test_delete_identity_allows_when_ton_wallet_flag_is_set(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Deleting a credential with --delete-ton-wallet should call delete_identity."""
+
+    cred_dir = tmp_path / "cred_default2"
+    ton_dir = cred_dir / "ton_wallet"
+    ton_dir.mkdir(parents=True, exist_ok=True)
+    wallet_file = ton_dir / "wallet.enc"
+    wallet_file.write_text("dummy", encoding="utf-8")
+
+    class _FakePaths:
+        def __init__(self, credential_dir: Path) -> None:
+            self.credential_dir = credential_dir
+
+    fake_paths = _FakePaths(credential_dir=cred_dir)
+
+    monkeypatch.setattr(
+        setup_identity,
+        "resolve_credential_paths",
+        lambda name: fake_paths if name == "default" else None,
+    )
+
+    called = {"delete_identity": False}
+
+    def _fake_delete_identity(name: str) -> bool:
+        called["delete_identity"] = True
+        return True
+
+    monkeypatch.setattr(setup_identity, "delete_identity", _fake_delete_identity)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "setup_identity.py",
+            "--delete",
+            "default",
+            "--delete-ton-wallet",
+        ],
+    )
+
+    setup_identity.main()
+
+    out = capsys.readouterr().out
+    assert "Deleted credential: default" in out
+    assert called["delete_identity"] is True

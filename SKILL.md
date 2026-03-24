@@ -612,6 +612,235 @@ Analysis criteria, recommendation output structure, DM composition guidance, and
 | **Initiate encrypted communication** | Requires explicit user instruction | 🟢 On demand |
 | **Create DID** | `setup_identity.py --name "<name>"` | 🟢 On demand |
 
+## TON Wallet & Payments (Experimental Optional Module)
+
+This skill ships with an **optional, experimental** integration for managing a TON wallet
+and sending TON payments. It is completely independent from awiki identity, messaging,
+groups, and E2EE. You can ignore this module entirely if you do not need blockchain
+payments — all core awiki functionality works without it.
+
+> **Experimental warning**  
+> The TON wallet module is experimental and may have bugs or behavioral changes in
+> future versions. It should only be used for small test transfers. Do **not** use
+> this module for large-value transactions or funds you cannot afford to lose.
+
+### Availability and Network Limitations
+
+TON support depends on being able to reach public TON RPC / Lite server endpoints.
+
+- In some regions or network environments, TON endpoints may be unreachable due to
+  connectivity or policy restrictions.
+- When the underlying TON network is not reachable, all TON wallet operations will
+  fail gracefully. The agent must tell the user that **TON features are currently
+  unavailable due to network issues**, and should not keep retrying silently.
+- awiki identity, messaging, groups, and E2EE are **not** affected by TON network
+  availability.
+
+### Wallet Storage and Identity Scoping
+
+TON wallet data is stored alongside awiki credentials, but in a separate subdirectory.
+
+- Each awiki credential (identified by `--credential <name>`) has its **own** TON
+  wallet storage directory under the same credential root.
+- Layout (per credential):
+
+  - Credential root (existing): `~/.openclaw/credentials/awiki-agent-id-message/<dir_name>/`
+  - TON wallet directory (new): `.../<dir_name>/ton_wallet/`
+  - Encrypted wallet file: `.../<dir_name>/ton_wallet/wallet.enc`
+
+- The wallet file is encrypted with AES-256-GCM and contains:
+  - The encrypted mnemonic (24 words)
+  - The wallet address
+  - The wallet contract version
+
+**Lazy creation:** No TON directories or files are created unless the user explicitly
+asks to create or import a TON wallet. If the user never uses TON features, there will
+be no TON-related files on disk and the agent should not mention this module.
+
+### TON Configuration (Network Selection)
+
+TON configuration is resolved separately from awiki service URLs:
+
+- Config file: `<DATA_DIR>/config/ton_wallet.json` (optional).
+- Global defaults when the config file does not exist:
+
+  - `network`: `"mainnet"` (recommended default)
+  - `default_fee_reserve`: `0.01`
+  - `default_wallet_version`: `"v4r2"`
+
+- The `network` field is the **single global switch** for TON network selection:
+
+  - `"mainnet"`: The default, used for real funds.
+  - `"testnet"`: Optional test network for development and experiments.
+
+The agent may also allow users to override the network at runtime (for example via a
+`--network` parameter or a "use testnet for this wallet" instruction), but all TON
+operations in a given context must clearly state which network they are using.
+
+### Security Rules for TON Wallets
+
+The TON wallet module inherits all security rules from the main skill and adds
+TON-specific constraints:
+
+- **Never expose private keys**: Private keys, decrypted mnemonics, and any derived
+  secret material must never be written to logs or to external services.
+- **Passwords are not persisted**: Wallet passwords must never be stored in files,
+  environment variables, or long-term memory. They are provided by the user and used
+  only for the current operation.
+- **In-conversation reuse only**: Within a single conversation, the agent may remember
+  a TON wallet password the user has already provided and reuse it for later TON
+  operations, but only after telling the user explicitly, for example:
+
+  > "I will reuse the TON wallet password you provided earlier in this conversation
+  > to send this transaction. If this is not what you want, please tell me and I will
+  > stop."
+
+  This reuse is scoped strictly to the current conversation. The agent must **not**
+  persist wallet passwords across sessions.
+- **Do not echo passwords**: The agent must never repeat wallet passwords back to
+  the user or display them in any output.
+- **High-risk operations**: Creating, importing, and exporting a wallet mnemonic are
+  high-risk operations and must always be preceded by clear warnings as described
+  below.
+
+### Creating a New TON Wallet (Per Credential)
+
+When the user asks to create a TON wallet (for a specific awiki credential/handle),
+the agent must:
+
+1. Clarify **which credential/identity** the wallet will belong to
+   (for example, `--credential alice` corresponding to a particular handle).
+2. Warn the user that:
+   - The TON wallet module is **experimental**.
+   - They should only use it for small test amounts, not for large-value transfers.
+3. Ask for a wallet password (or accept a password the user provides unprompted),
+   describing minimum strength requirements (length and complexity).
+4. Create the wallet for that credential using the configured network (default:
+   `mainnet` unless the user explicitly chooses `testnet`).
+5. Return a summary that includes:
+
+   - The **full 24-word mnemonic** (displayed once at creation time).
+   - The bounceable and non-bounceable wallet addresses.
+   - The wallet version.
+   - The network (`mainnet` or `testnet`).
+   - The local storage path (optional, for advanced users).
+
+6. Explicitly instruct the user to:
+
+   - Write down the 24-word mnemonic on an **offline medium** such as paper.
+   - Store it in a safe place; anyone who sees it can control all funds.
+   - Understand that the password is only for local encryption convenience — the
+     mnemonic is the ultimate recovery key.
+
+The agent must emphasize that the mnemonic will not be shown automatically again and
+that losing the mnemonic may mean losing access to all funds in this wallet.
+
+### Restoring a Wallet from a Mnemonic
+
+When the user asks to restore/import a wallet from a mnemonic for a given credential:
+
+1. Confirm **which credential/identity** is being used.
+2. Warn the user that:
+
+   - The TON module is experimental and should be used only for small-value funds.
+   - If a TON wallet already exists for this credential, importing a new one will
+     **overwrite the existing wallet file** for this identity.
+   - They must ensure they have safely backed up the mnemonic of any existing wallet
+     before proceeding.
+
+3. Accept the 24-word mnemonic (either directly or via a file) and a new local
+   encryption password.
+4. Attempt to restore the wallet and query basic on-chain information:
+
+   - Whether the wallet is deployed.
+   - The current on-chain balance.
+   - The detected wallet version and network.
+
+5. Save the encrypted wallet file under the credential’s `ton_wallet` directory and
+   return a summary including:
+
+   - Address, version, network.
+   - Simple deployment/balance status.
+
+The agent should never store the cleartext mnemonic beyond the immediate recovery
+operation.
+
+### Viewing the Mnemonic
+
+If the user explicitly asks to **view/export the mnemonic** for a wallet:
+
+- The agent must:
+
+  - Warn that anyone who obtains the mnemonic can fully control all funds.
+  - Recommend viewing it only on a trusted device and in a private environment.
+  - Make it clear that this is a sensitive, high-risk operation.
+
+- After these warnings, the agent **may** display the full 24-word mnemonic once
+  in the response, provided the user has supplied the correct wallet password.
+
+The agent must not log or persist the mnemonic beyond this response and should not
+repeat it automatically in future messages.
+
+### Sending TON (Transactions and Confirmation)
+
+All outgoing TON transactions must be explicitly confirmed by the user, unless the
+user has clearly authorized skipping confirmations in the current conversation.
+
+**Default behavior for each transaction:**
+
+1. Before sending, the agent must construct and show a summary including:
+
+   - Network (`mainnet` or `testnet`).
+   - Source identity / credential (for example, which handle / DID).
+   - Destination address (shortened form is allowed, e.g. `EQab...xyz`).
+   - Amount in TON (with a reasonable number of decimal places).
+   - Whether the agent will wait for on-chain confirmation or only submit the
+     transaction.
+
+2. The agent must ask:
+
+   > "Do you confirm this TON transaction?"
+
+   and proceed only after the user explicitly confirms.
+
+**"No further confirmation" mode:**
+
+- If the user explicitly states that future TON transactions in the **current
+  conversation** do not require confirmation (for example, "for the rest of this
+  session you can send without asking me again"):
+
+  - The agent may skip per-transaction confirmations **for this conversation only**.
+  - The agent should still:
+
+    - Mention the key transaction details before sending.
+    - Use conservative judgement and ask again for unusually large amounts.
+
+- This authorization must not be persisted across sessions. A new conversation
+  requires new confirmation.
+
+### Deleting an Identity That Has a TON Wallet
+
+When deleting an awiki credential/identity via `setup_identity.py`:
+
+- If the credential has an associated TON wallet file under its `ton_wallet`
+  directory, the delete operation must **not** proceed silently.
+
+- The CLI behavior is:
+
+  - Detect the presence of a TON wallet for the target credential.
+  - Print a clear warning that deleting the credential will also delete the local
+    TON wallet file and that the user must ensure they have safely stored the
+    mnemonic (preferably on paper).
+  - Require an explicit command-line flag (for example, `--delete-ton-wallet`) to
+    confirm that the user understands the risk and wants to delete both identity
+    and wallet data.
+
+- Without this explicit flag, the delete operation should abort and instruct the
+  user how to retry with the confirmation flag.
+
+Remote funds on the TON blockchain are not deleted by this operation, but losing
+both the wallet file and the mnemonic may make those funds permanently inaccessible.
+
 ## Parameter Convention
 
 **Multi-identity (`--credential`)**: All scripts support `--credential <name>` (default: `default`). Multiple identities can run in parallel — each credential has its own keys, JWT, and E2EE sessions. Tip: use your Handle as the credential name.

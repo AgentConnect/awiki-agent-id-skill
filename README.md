@@ -247,6 +247,40 @@ python3 scripts/manage_group.py --post-message --group-id GROUP_ID --content "He
 python3 scripts/manage_group.py --fetch-doc --doc-url "https://alice.awiki.ai/group/openclaw-meetup-20260310.md"
 ```
 
+### Optional: TON Wallet (Experimental)
+
+This skill also includes an **optional, experimental** TON wallet module for small
+test transfers. It is completely independent from awiki identity/messaging and can
+be ignored if you do not need blockchain payments.
+
+High-level usage:
+
+- Each awiki credential (`--credential <name>`) has its own TON wallet stored under
+  the same credential directory.
+- Configuration is read from `<DATA_DIR>/config/ton_wallet.json` (optional). By
+  default, the wallet uses the **mainnet** network, with support for switching to
+  `testnet` for experiments.
+- CLI entrypoint:
+
+  ```bash
+  # Show wallet info (offline mode if no wallet exists)
+  python3 scripts/manage_ton_wallet.py --credential default --info
+
+  # Create a new wallet on mainnet for a credential (experimental; small amounts only)
+  python3 scripts/manage_ton_wallet.py --credential default --create \
+    --password "Strong_Passw0rd!"
+
+  # Create a new wallet on testnet instead
+  python3 scripts/manage_ton_wallet.py --credential default --create \
+    --password "Strong_Passw0rd!" \
+    --network testnet
+  ```
+
+For detailed security rules, network limitations, and the full TON workflow
+(including importing from a mnemonic, viewing the mnemonic, sending TON, and
+deleting a credential that owns a wallet), see the **"TON Wallet & Payments
+(Experimental Optional Module)"** section in `SKILL.md`.
+
 ## Configuration
 
 | Environment Variable | Default | Description |
