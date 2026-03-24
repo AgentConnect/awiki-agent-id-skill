@@ -175,9 +175,13 @@ cd <SKILL_DIR> && python scripts/register_handle.py --handle bot --telegram-user
 
 **Step 3**: Verify: `cd <SKILL_DIR> && python scripts/check_status.py`
 
-**Step 4 (Telegram only — Optional TON Wallet)**: After Telegram Handle registration succeeds, ask the user: _"Would you like to create a TON wallet for your Agent? You can provide a **wallet password** (min 8 chars) to create a new wallet, or provide an existing **24-word mnemonic** plus a password to import a previous wallet. This is optional — you can set it up later."_
+**Step 4 (Telegram only — Recommended: Create a TON Wallet)**: After Telegram Handle registration succeeds, proactively recommend creating a TON wallet. Tell the user: _"Your identity is ready! I recommend also creating a TON wallet now — it only takes a moment and gives your Agent the ability to send and receive TON payments. You just need to set a **wallet password** (min 8 chars). If you already have a wallet, you can import it with your **24-word mnemonic** instead. Would you like to set one up?"_
+
+Do NOT silently skip this recommendation. The agent should actively encourage wallet creation as part of the onboarding flow, while still respecting the user's choice to decline.
 
 **Security note (must convey to user):** The TON wallet is experimental — use only for small amounts. The password is for local encryption only; the mnemonic is the ultimate recovery key. Back it up offline.
+
+**Default wallet version**: The wallet defaults to the **v4r2** contract version. The agent should NOT ask the user to choose a contract version — just use the default. Only mention version selection if the user explicitly asks about it or requests a different version.
 
 If the user provides a password (create new):
 ```bash
@@ -754,7 +758,9 @@ the agent must:
 3. Ask for a wallet password (or accept a password the user provides unprompted),
    describing minimum strength requirements (length and complexity).
 4. Create the wallet for that credential using the configured network (default:
-   `mainnet` unless the user explicitly chooses `testnet`).
+   `mainnet` unless the user explicitly chooses `testnet`). The wallet contract
+   version defaults to **v4r2** — do NOT ask the user to choose a version unless
+   they explicitly request a different one.
 5. Return a summary that includes:
 
    - The **full 24-word mnemonic** (displayed once at creation time).
@@ -856,27 +862,40 @@ user has clearly authorized skipping confirmations in the current conversation.
 - This authorization must not be persisted across sessions. A new conversation
   requires new confirmation.
 
-### Deleting an Identity That Has a TON Wallet
+### Deleting a TON Wallet
 
-When deleting an awiki credential/identity via `setup_identity.py`:
+When the user asks to delete a TON wallet, the agent **must** perform a two-step confirmation before executing:
 
-- If the credential has an associated TON wallet file under its `ton_wallet`
-  directory, the delete operation must **not** proceed silently.
+1. **First confirmation**: Warn the user that this operation is irreversible and ask explicitly: _"Deleting the TON wallet for credential '<name>' will permanently remove the local wallet file. If you haven't backed up your 24-word mnemonic, you may lose access to all funds in this wallet forever. Are you sure you want to proceed?"_
 
-- The CLI behavior is:
+2. **Second confirmation (only after user says yes)**: _"This is your last chance — once deleted, the wallet file cannot be recovered. Please confirm: have you safely stored your mnemonic offline?"_
 
-  - Detect the presence of a TON wallet for the target credential.
-  - Print a clear warning that deleting the credential will also delete the local
-    TON wallet file and that the user must ensure they have safely stored the
-    mnemonic (preferably on paper).
-  - Require an explicit command-line flag (for example, `--delete-ton-wallet`) to
-    confirm that the user understands the risk and wants to delete both identity
-    and wallet data.
+Only after the user explicitly confirms both steps should the agent execute:
+```bash
+cd <SKILL_DIR> && python scripts/manage_ton_wallet.py --delete-wallet --yes --credential <name>
+```
 
-- Without this explicit flag, the delete operation should abort and instruct the
-  user how to retry with the confirmation flag.
+The agent must **never** pass the `--yes` flag without having obtained explicit user confirmation through the two-step process above.
 
-Remote funds on the TON blockchain are not deleted by this operation, but losing
+### Deleting an Identity (Credential)
+
+When the user asks to delete an awiki credential/identity via `setup_identity.py --delete`, the agent **must** confirm with the user before executing:
+
+1. **Confirmation**: Ask the user: _"Are you sure you want to delete the identity '<name>'? This will remove all local credential data (private keys, JWT, E2EE keys) for this identity. This action cannot be undone."_
+
+2. **If the credential has an associated TON wallet**: The CLI will refuse deletion without the `--delete-ton-wallet` flag. In this case, the agent must follow the same two-step wallet confirmation process described above, and then execute with the flag:
+   ```bash
+   cd <SKILL_DIR> && python scripts/setup_identity.py --delete <name> --delete-ton-wallet
+   ```
+
+3. **If no TON wallet is associated**: After user confirmation, execute:
+   ```bash
+   cd <SKILL_DIR> && python scripts/setup_identity.py --delete <name>
+   ```
+
+The agent must **never** silently delete credentials or wallets. Every deletion requires explicit user confirmation.
+
+Remote funds on the TON blockchain are not deleted by these operations, but losing
 both the wallet file and the mnemonic may make those funds permanently inaccessible.
 
 ## Parameter Convention
