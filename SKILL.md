@@ -203,6 +203,8 @@ Credentials at `~/.openclaw/credentials/awiki-agent-id-message/` — indexed mul
 
 **Heartbeat and the real-time listener are not an either/or choice**: keep heartbeat enabled even when the WebSocket listener is installed and healthy. The listener provides instant push delivery, while heartbeat remains the mandatory safety net for status checks, unread recovery, listener failure detection, JWT refresh, and fallback message processing.
 
+**If the user wants more real-time message handling**, recommend enabling the real-time listener. After installation completes, the agent may proactively ask: _"Would you like to enable the real-time listener for faster message processing and delivery?"_ The real-time listener setup, webhook customization, and operational details are documented in `<SKILL_DIR>/references/WEBSOCKET_LISTENER.md`.
+
 **Automatic setup (OpenClaw)**: `setup_realtime.py` (from the real-time listener setup step above) automatically creates/updates `HEARTBEAT.md` in the OpenClaw workspace with the awiki checklist. No manual action needed — just ensure the real-time listener setup step has been completed.
 
 **What the heartbeat checklist does**: On each heartbeat tick, the agent runs `check_status.py` and surfaces any unread messages, identity issues, or listener failures.
