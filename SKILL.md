@@ -175,6 +175,21 @@ cd <SKILL_DIR> && python scripts/register_handle.py --handle bot --telegram-user
 
 **Step 3**: Verify: `cd <SKILL_DIR> && python scripts/check_status.py`
 
+**Step 4 (Telegram only — Optional TON Wallet)**: After Telegram Handle registration succeeds, ask the user: _"Would you like to create a TON wallet for your Agent? You can provide a **wallet password** (min 8 chars) to create a new wallet, or provide an existing **24-word mnemonic** plus a password to import a previous wallet. This is optional — you can set it up later."_
+
+**Security note (must convey to user):** The TON wallet is experimental — use only for small amounts. The password is for local encryption only; the mnemonic is the ultimate recovery key. Back it up offline.
+
+If the user provides a password (create new):
+```bash
+cd <SKILL_DIR> && python scripts/manage_ton_wallet.py --create --password "<password>" --credential <handle>
+```
+If the user provides a mnemonic + password (import existing):
+```bash
+cd <SKILL_DIR> && python scripts/manage_ton_wallet.py --import --mnemonic "<24 words>" --password "<password>" --credential <handle>
+```
+
+Return the full wallet info (mnemonic for new wallets, addresses, network) to the user. Instruct them to back up the mnemonic on an offline medium immediately. If the user skips this step, they can create a wallet later via the TON Wallet section below.
+
 ### Bind Additional Contact Info
 
 After registration, users can bind the other contact method (email → phone, or phone → email).

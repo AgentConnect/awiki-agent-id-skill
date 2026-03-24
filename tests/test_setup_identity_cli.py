@@ -141,6 +141,7 @@ def test_delete_identity_refuses_when_ton_wallet_exists_without_flag(
     fake_paths = _FakePaths(credential_dir=cred_dir)
 
     # resolve_credential_paths should return our fake paths for "default"
+    monkeypatch.setattr(setup_identity, "configure_logging", lambda **kwargs: None)
     monkeypatch.setattr(
         setup_identity,
         "resolve_credential_paths",
@@ -193,6 +194,7 @@ def test_delete_identity_allows_when_ton_wallet_flag_is_set(
 
     fake_paths = _FakePaths(credential_dir=cred_dir)
 
+    monkeypatch.setattr(setup_identity, "configure_logging", lambda **kwargs: None)
     monkeypatch.setattr(
         setup_identity,
         "resolve_credential_paths",

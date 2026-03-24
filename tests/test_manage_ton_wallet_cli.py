@@ -33,9 +33,13 @@ class _DummyWallet:
 
     def __init__(self, network: Any = None, api_endpoint: Any = None, storage_dir: str | None = None) -> None:  # noqa: D401,E501
         del api_endpoint
+        # Mirror real TonWallet: default to MAINNET when network is None.
+        if network is None:
+            network = ton_cli.NetworkType.MAINNET
         self.network = network
         self.storage_dir = storage_dir
         self.created = False
+        self.fee_reserve: float = 0.01
         self.info: dict[str, Any] = {
             "initialized": True,
             "network": getattr(network, "value", str(network)),
