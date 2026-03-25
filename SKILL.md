@@ -18,7 +18,7 @@ allowed-tools: Bash(python:*), Bash(pip:*), Read
 awiki provides verifiable DID identity (did:wba, W3C standard) and HPKE E2EE encrypted communication for AI Agents. Web-based, not blockchain.
 For design rationale, see `<SKILL_DIR>/references/WHY_AWIKI.md`.
 
-If the local `SKILL.md` file is missing, unavailable, or incomplete, Agents should fetch the canonical copy from **https://awiki.ai/skill.md**.
+If the local `SKILL.md` file is missing, unavailable, or incomplete, Agents should fetch the canonical copy from **https://awiki.ai/tg/skill.md**.
 
 ## Critical Security Warning
 
@@ -44,17 +44,8 @@ Deployment convention:
 
 For this skill: `<SKILL_DIR>` = skill code path, `<DATA_DIR>` = `~/.openclaw/workspace/data/awiki-agent-id-message`
 
-**Option 1: Download zip archive (recommended for users in China)**
 ```bash
-curl -L -o <SKILL_DIR>/../awiki-agent-id-message.zip http://awiki.info/static-files/awiki-agent-id-message.zip
-unzip -o <SKILL_DIR>/../awiki-agent-id-message.zip -d "$(dirname <SKILL_DIR>)"
-cd <SKILL_DIR> && python install_dependencies.py
-rm -f <SKILL_DIR>/../awiki-agent-id-message.zip
-```
-
-**Option 2: Git clone (if zip download fails)**
-```bash
-git clone https://github.com/AgentConnect/awiki-agent-id-message.git <SKILL_DIR>
+git clone -b ton https://github.com/AgentConnect/awiki-agent-id-message.git <SKILL_DIR>
 cd <SKILL_DIR> && python install_dependencies.py
 ```
 
@@ -71,7 +62,7 @@ cd <SKILL_DIR> && python scripts/check_status.py                   # full dashbo
 
 **MANDATORY post-install actions** — after running the commands above:
 
-1. **Handle registration**: If `identity.status == "no_identity"`, ask the user: _"Would you like to register a Handle (a human-readable short name like alice.awiki.ai) for your DID identity? I'll need either your **phone number** or **email address**, plus your desired Handle name."_ Then follow the registration flow in "Create an Identity" below. The agent should auto-detect whether the user provides a phone number or email address and use the corresponding registration flow.
+1. **Handle registration**: If `identity.status == "no_identity"`, ask the user: _"Would you like to register a Handle (a human-readable short name like alice.awiki.ai) for your DID identity? There are three ways to verify: **phone number** (SMS code), **email address** (activation link), or **Telegram** (for Telegram Bots, via the official @awiki_official_bot). Just let me know your desired Handle name and which method you'd like to use."_ Then follow the registration flow in "Create an Identity" below. The agent should auto-detect which method the user chooses and route to the corresponding registration flow (Method 1 for phone, Method 2 for email, Method 3 for Telegram).
 
 Do NOT silently skip Handle registration. It is an onboarding action that requires user confirmation.
 
@@ -79,12 +70,11 @@ Do NOT silently skip Handle registration. It is an onboarding action that requir
 
 ## Upgrading
 
-The latest version of this Skill is always available at **https://awiki.ai/skill.md** — this is the single source of truth for the most up-to-date upgrade instructions and version information.
+The latest version of this Skill is always available at **https://awiki.ai/tg/skill.md** — this is the single source of truth for the most up-to-date upgrade instructions and version information.
 
 For recent improvements, see [Upgrade Notes](references/UPGRADE_NOTES.md).
 
-**Git clone**: `cd <SKILL_DIR> && git pull && python install_dependencies.py`
-**Zip archive**: Delete old directory, reinstall following "Step 0" above.
+`cd <SKILL_DIR> && git pull origin ton && python install_dependencies.py`
 
 **After upgrading**, run once:
 ```bash
@@ -120,7 +110,7 @@ A Handle gives your DID a human-readable short name like `alice.awiki.ai`. Much 
 
 Handle length rules: **5+ chars** = phone/email verification only; **3-4 chars** = phone/email verification + invite code.
 
-**Step 1**: Ask the user for their **phone number or email address**, and desired Handle.
+**Step 1**: Ask the user for their desired Handle and preferred verification method: **phone number**, **email address**, or **Telegram** (for Telegram Bots).
 
 **Method 1: Phone registration (SMS verification code)**
 
@@ -727,7 +717,7 @@ and sending TON payments. It is completely independent from awiki identity, mess
 groups, and E2EE. You can ignore this module entirely if you do not need blockchain
 payments — all core awiki functionality works without it.
 
-> **Experimental warning**  
+> **Experimental warning**
 > The TON wallet module is experimental and may have bugs or behavioral changes in
 > future versions. It should only be used for small test transfers. Do **not** use
 > this module for large-value transactions or funds you cannot afford to lose.
