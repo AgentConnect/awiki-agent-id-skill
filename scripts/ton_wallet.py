@@ -453,10 +453,13 @@ class TonWallet:
         await self._init_client()
 
         try:
+            kwargs = dict(wc=0)
+            if wallet_cls is WalletV5R1:
+                kwargs["network_global_id"] = -3 if self.network == NetworkType.TESTNET else -239
             self.wallet = await wallet_cls.from_mnemonic(
                 self.client,
                 mnemonics,
-                wc=0
+                **kwargs
             )
         except Exception as e:
             raise WalletError(f"从助记词恢复钱包失败: {e}")
@@ -503,7 +506,10 @@ class TonWallet:
         if wallet_version is not None:
             # 手动指定版本，直接恢复
             wallet_cls = _get_wallet_class(wallet_version)
-            wallet = await wallet_cls.from_mnemonic(self.client, mnemonics, wc=0)
+            kwargs = dict(wc=0)
+            if wallet_cls is WalletV5R1:
+                kwargs["network_global_id"] = -3 if self.network == NetworkType.TESTNET else -239
+            wallet = await wallet_cls.from_mnemonic(self.client, mnemonics, **kwargs)
         else:
             # 自动探测：逐版本查链上状态
             wallet, wallet_version = await self._detect_wallet_version(mnemonics)
@@ -558,8 +564,11 @@ class TonWallet:
 
         for version, wallet_cls in WALLET_CLASSES.items():
             try:
+                kwargs = dict(wc=0)
+                if wallet_cls is WalletV5R1:
+                    kwargs["network_global_id"] = -3 if self.network == NetworkType.TESTNET else -239
                 wallet = await wallet_cls.from_mnemonic(
-                    self.client, mnemonics, wc=0
+                    self.client, mnemonics, **kwargs
                 )
                 account = await self.client.get_account_state(wallet.address)
                 is_deployed = account.state.type_ == 'active'
