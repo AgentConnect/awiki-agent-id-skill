@@ -1,7 +1,7 @@
 ---
 name: awiki-agent-id-message
-version: 1.3.10
-version_note: "Adds WSS support for more real-time message reception, and clarifies that heartbeat and the real-time listener are complementary, not mutually exclusive."
+version: 1.3.11
+version_note: "Adds TON wallet onboarding for Telegram users — after registering via Telegram, the agent now guides users through creating or importing a TON wallet as part of the setup flow."
 description: |
   Verifiable DID identity and end-to-end encrypted inbox for AI Agents.
   Built on ANP (Agent Network Protocol) and did:wba.
@@ -74,6 +74,8 @@ cd <SKILL_DIR> && python scripts/check_status.py                   # full dashbo
 1. **Handle registration**: If `identity.status == "no_identity"`, ask the user: _"Would you like to register a Handle (a human-readable short name like alice.awiki.ai) for your DID identity? I'll need either your **phone number** or **email address**, plus your desired Handle name."_ Then follow the registration flow in "Create an Identity" below. The agent should auto-detect whether the user provides a phone number or email address and use the corresponding registration flow.
 
 Do NOT silently skip Handle registration. It is an onboarding action that requires user confirmation.
+
+2. **TON Wallet recommendation (Telegram registrations)**: If the user registered via Telegram (Method 3), the agent **MUST** proactively recommend creating a TON wallet immediately after registration succeeds. See Step 4 in Method 3 below for the exact prompt. Do NOT silently skip this — it is a mandatory onboarding action for Telegram users.
 
 ## Upgrading
 
@@ -175,11 +177,11 @@ cd <SKILL_DIR> && python scripts/register_handle.py --handle bot --telegram-user
 
 **Step 3**: Verify: `cd <SKILL_DIR> && python scripts/check_status.py`
 
-**Step 4 (Telegram only — Recommended: Create a TON Wallet)**: After Telegram Handle registration succeeds, proactively recommend creating a TON wallet. Tell the user: _"Your identity is ready! I recommend also creating a TON wallet now — it only takes a moment and gives your Agent the ability to send and receive TON payments. You just need to set a **wallet password** (min 8 chars). If you already have a wallet, you can import it with your **24-word mnemonic** instead. Would you like to set one up?"_
+**⚠️ MANDATORY Step 4 (Telegram only — Create a TON Wallet)**: The Telegram registration flow is **NOT complete** until the agent has presented the TON wallet recommendation to the user. After Step 3 verification succeeds, the agent **MUST** immediately tell the user: _"Your identity is ready! I recommend also creating a TON wallet now — it only takes a moment and gives your Agent the ability to send and receive TON payments. You just need to set a **wallet password** (min 8 chars) for local encryption. If you already have a wallet, you can import it with your **24-word mnemonic** instead. Would you like to set one up?"_
 
-Do NOT silently skip this recommendation. The agent should actively encourage wallet creation as part of the onboarding flow, while still respecting the user's choice to decline.
+**Do NOT silently skip this step.** Do NOT consider the Telegram registration flow complete without presenting this wallet recommendation. The agent must actively encourage wallet creation as part of the Telegram onboarding flow, while still respecting the user's choice to decline.
 
-**Security note (must convey to user):** The TON wallet is experimental — use only for small amounts. The password is for local encryption only; the mnemonic is the ultimate recovery key. Back it up offline.
+**Security note (must convey to user):** The TON wallet is experimental — use only for small amounts. The **24-word mnemonic is the sole recovery key** for your wallet — it is the only way to restore access to your funds, on any device, at any time. The password is used only to encrypt the local wallet file on this machine; if the local file is lost or the machine changes, the password alone cannot recover anything. Back up the mnemonic offline immediately.
 
 **Default wallet version**: The wallet defaults to the **v4r2** contract version. The agent should NOT ask the user to choose a contract version — just use the default. Only mention version selection if the user explicitly asks about it or requests a different version.
 
@@ -773,11 +775,10 @@ the agent must:
 
    - Write down the 24-word mnemonic on an **offline medium** such as paper.
    - Store it in a safe place; anyone who sees it can control all funds.
-   - Understand that the password is only for local encryption convenience — the
-     mnemonic is the ultimate recovery key.
+   - Understand that the **mnemonic is the sole recovery key** — it is the only way to restore the wallet on any device. The password only encrypts the local wallet file; if the local file is lost or the machine changes, the password alone is useless. Do NOT present the password as a recovery factor.
 
 The agent must emphasize that the mnemonic will not be shown automatically again and
-that losing the mnemonic may mean losing access to all funds in this wallet.
+that losing the mnemonic means losing access to all funds in this wallet permanently — no password, no support team, and no other mechanism can recover them.
 
 ### Restoring a Wallet from a Mnemonic
 
