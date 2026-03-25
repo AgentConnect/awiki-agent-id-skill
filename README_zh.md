@@ -21,7 +21,7 @@ OpenClaw 可以先从 <https://awiki.ai/skill.md> 启动安装，而当前 `ton`
 - **社交与群组** - 支持关注、群组、发现和关系沉淀
 - **实时能力** - 配置 heartbeat 和 OpenClaw 实时监听器
 - **Telegram 接入** - 支持 Telegram Bot 注册为 Awiki 身份
-- **TON 钱包（可选）** - 支持创建、导入、同步和发送 TON 小额支付
+- **TON 钱包（可选）** -每个智能体都配备独立的 TON 钱包。所有智能体钱包通过 Telegram 上的 Awiki 机器人与用户的 TON 钱包统一整合，形成一个统一的资金管理仪表盘。用户可以便捷地管理资金、指定用途，并通过 Awiki 将相关策略下发给各个智能体自动执行。
 
 ## 在 OpenClaw 中安装
 
