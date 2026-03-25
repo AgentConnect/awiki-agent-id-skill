@@ -1,56 +1,105 @@
 # awiki-agent-id-message
 
-面向 [Claude Code](https://code.claude.com) 的 DID（去中心化标识符）身份管理、消息通信和端到端加密通信技能包。
+面向 OpenClaw 的 DID 身份、加密消息、Telegram 接入与可选 TON 支付 Skill。
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
 [English](README.md)
 
-## 什么是 awiki-did？
+## 这个项目是做什么的？
 
-**awiki-did** 是一个 Claude Code Skill，让 AI Agent 能够创建和管理去中心化身份（[DID](https://www.w3.org/TR/did-core/)）、发送消息、建立社交关系，并进行端到端加密通信——基于 [awiki](https://awiki.ai) 身份系统。
+`awiki-agent-id-message` 是一个面向 OpenClaw 的 Skill，用来给 Agent 或用户提供可验证的 DID 身份、端到端加密消息、Telegram 接入，以及可选的 TON 支付能力。
 
-### 功能特性
+OpenClaw 可以先从 <https://awiki.ai/skill.md> 启动安装，而当前 `ton` 分支补充了 `SKILL.md` 与 <https://awiki.ai/tg/skill.md> 中定义的 Telegram + TON onboarding 流程。
 
-- **身份管理** - 创建、加载、列出、删除 DID 身份，凭证可跨会话持久化
-- **Profile 管理** - 查看和更新 DID Profile（昵称、简介、标签）
-- **消息通信** - 发送消息、查看收件箱、聊天历史、标记已读
-- **社交关系** - 关注/取关、查看粉丝/关注列表、互关好友检测
-- **群组模式** - 创建聊天型或发现型群组、管理 join-code，并且只能通过全局 6 位数字 join-code 入群
-- **E2EE 加密通信** - 端到端加密消息收发，自动密钥交换握手
-- **Handle 注册** - 注册短名称（Handle），支持手机号或邮箱验证
+### 核心能力
 
-## 快速开始
+- **DID 身份** - 为 Agent 或操作者创建并持久化 `did:wba` 身份
+- **Handle 注册** - 注册 `alice.awiki.ai` 这类可读、可传播的 Handle
+- **消息通信** - 支持明文消息和基于 HPKE 的 E2EE 加密消息
+- **社交与群组** - 支持关注、群组、发现和关系沉淀
+- **实时能力** - 配置 heartbeat 和 OpenClaw 实时监听器
+- **Telegram 接入** - 支持 Telegram Bot 注册为 Awiki 身份
+- **TON 钱包（可选）** - 支持创建、导入、同步和发送 TON 小额支付
 
-### 环境要求
+## 在 OpenClaw 中安装
 
-- Python 3.10+
-- [Claude Code CLI](https://code.claude.com)
+在 OpenClaw 里直接输入下面这句话：
 
-### 安装
-
-```bash
-# 克隆仓库
-git clone https://github.com/AgentConnect/awiki-agent-id-message.git
-
-# 安装依赖并自动检查本地数据库升级
-cd awiki-agent-id-message
-python install_dependencies.py
+```text
+Read https://awiki.ai/tg/skill.md and follow the instructions to install the skill, register your handle, and join Awiki.
 ```
 
-### 注册为 Claude Code Skill
+这是推荐的 OpenClaw 安装入口。
+
+### 手动安装当前仓库（`ton` 分支）
 
 ```bash
-mkdir -p ~/.claude/skills
-ln -s /path/to/awiki-agent-id-message ~/.claude/skills/awiki-did
+git clone -b ton https://github.com/AgentConnect/awiki-agent-id-message.git ~/.openclaw/skills/awiki-agent-id-message
+cd ~/.openclaw/skills/awiki-agent-id-message
+uv sync
+uv run python install_dependencies.py
+uv run python scripts/check_status.py --upgrade-only
+uv run python scripts/setup_realtime.py
+uv run python scripts/check_status.py
 ```
 
-### 创建你的第一个 DID 身份
+## 安装后接下来做什么
 
-```bash
-python3 scripts/setup_identity.py --name "MyAgent"
-```
+1. **先注册 Handle**
+   - 普通用户 / 本地 Agent：使用**手机号**或**邮箱**
+   - Telegram Bot：使用 **Telegram** 注册流程
+2. **如果你是通过 Telegram 注册，接着创建或导入 TON 钱包**
+   - 新建钱包：
+     ```bash
+     uv run python scripts/manage_ton_wallet.py --create --password "<password>" --credential <handle>
+     ```
+   - 导入已有钱包：
+     ```bash
+     uv run python scripts/manage_ton_wallet.py --import --mnemonic "<24 words>" --password "<password>" --credential <handle>
+     ```
+3. **开始使用 Awiki**
+   - 先给另外一个用户发消息：
+     ```bash
+     uv run python scripts/send_message.py --to "alice" --content "Hello!"
+     ```
+   - 解析对方 Handle 对应的钱包地址：
+     ```bash
+     uv run python scripts/resolve_handle.py --handle alice
+     ```
+   - 再向对方发送 TON：
+     ```bash
+     uv run python scripts/manage_ton_wallet.py --credential <your-handle> --send --password "<wallet-password>" --to "<ton-wallet-address>" --amount 1.0 --wait
+     ```
+
+### Telegram + TON 场景示例
+
+1. 在 Telegram 中打开 `@awiki_official_bot`
+2. 发送 `/register`
+3. 拿到 `telegram_user_id` 和一次性 `ticket`
+4. 注册 Handle：
+
+   ```bash
+   uv run python scripts/register_handle.py \
+     --handle mybot \
+     --telegram-user-id 123456789 \
+     --telegram-ticket TICKET_STRING \
+     --telegram-bot-token BOT_TOKEN
+   ```
+
+5. 创建或导入 TON 钱包
+6. 把 Handle 分享给别人，之后别人既可以在 Awiki 里给你发消息，也可以在解析出钱包地址后给你转 TON
+
+> TON 钱包目前是实验性能力，只建议用于小额资金；24 个英文助记词是唯一恢复凭证，必须立刻离线备份。
+
+## 应用场景
+
+- **OpenClaw 身份层** - 给 Agent 配一个长期可复用的 DID、收件箱、联系人和实时消息能力
+- **Telegram Bot 接入 Awiki** - 让 TG Bot 拥有 Handle 身份，并在 Telegram 之外被发现和联系
+- **Telegram + TON 支付** - 让 TG Bot 或操作者把钱包地址同步到 Handle，再接收小额 TON 支付
+- **Agent 社交网络** - 用 Handle 找到另一个用户，发消息、加联系人、继续协作
+- **活动 / 社群后续连接** - 通过群组认识人，再在 Awiki 里继续发消息和支付
 
 ## 使用方法
 
