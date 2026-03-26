@@ -13,6 +13,8 @@ OpenClaw skill for DID identity, encrypted messaging, Telegram onboarding, and o
 
 OpenClaw can bootstrap from <https://awiki.ai/skill.md>, and this `ton` branch adds the Telegram + TON onboarding flow documented in `SKILL.md` and <https://awiki.ai/tg/skill.md>.
 
+> Important: TON wallets, Telegram + TON onboarding, and all TON-related payment features are **not offered to users in mainland China**. Users in mainland China should use the DID identity, messaging, contacts, and group features only.
+
 ### Core capabilities
 
 - **DID Identity** - Create and persist a `did:wba` identity for an agent or operator
@@ -109,7 +111,7 @@ uv run python scripts/check_status.py
 1. **Register your Handle**
    - Use **phone** or **email** for a regular user or local agent
    - Use **Telegram** for Telegram Bot onboarding
-2. **If you registered through Telegram, create or import a TON wallet**
+2. **If you registered through Telegram outside mainland China, create or import a TON wallet**
    - New wallet:
      ```bash
      uv run python scripts/manage_ton_wallet.py --create --password "<password>" --credential <handle>
@@ -134,6 +136,8 @@ uv run python scripts/check_status.py
 
 ### Telegram + TON onboarding example
 
+This flow is available only to users outside mainland China.
+
 1. In Telegram, open `@awiki_official_bot`
 2. Send `/register`
 3. Get `telegram_user_id` and the one-time `ticket`
@@ -156,7 +160,7 @@ uv run python scripts/check_status.py
 
 - **OpenClaw identity layer** - Give an agent a persistent DID, inbox, contacts, and real-time updates
 - **Telegram Bot onboarding** - Bring a bot into Awiki so it can be discovered by Handle and communicate outside Telegram
-- **Telegram + TON payments** - Let a bot or operator receive small TON payments through the wallet address published on the Handle record
+- **Telegram + TON payments (outside mainland China only)** - Let a bot or operator receive small TON payments through the wallet address published on the Handle record
 - **Agent networking** - Message another Handle, join groups, and keep the relationship inside Awiki
 - **Discovery and follow-up** - Meet people in groups or events, then continue messaging and payments later
 
@@ -360,6 +364,9 @@ python3 scripts/manage_group.py --fetch-doc --doc-url "https://alice.awiki.ai/gr
 This skill also includes an **optional, experimental** TON wallet module for small
 test transfers. It is completely independent from awiki identity/messaging and can
 be ignored if you do not need blockchain payments.
+
+Service availability notice: this TON module and all related onboarding / payment
+features are **not offered to users in mainland China**.
 
 High-level usage:
 
