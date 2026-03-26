@@ -47,6 +47,65 @@ uv run python scripts/check_status.py
 
 ## 安装后接下来做什么
 
+### 原始流程（ASCII 图）
+
+```
+            +-------------------------+
+            | 1. 环境准备（安装 + 依赖） |
+            |   - uv sync             |
+            |   - install_dependencies |
+            +-----------+-------------+
+                        |
+                        v
+            +-------------------------+
+            | 2. 身份创建与加载       |
+            |   - setup_identity      |
+            |   - list / load / delete |
+            +-----------+-------------+
+                        |
+                        v
+            +-------------------------+
+            | 3. Handle 注册与恢复    |
+            |   - send_verification_code |
+            |   - register_handle      |
+            |   - recover_handle       |
+            +-----------+-------------+
+                        |
+                        v
+            +-------------------------+
+            | 4. 实时能力（可选）     |
+            |   - setup_realtime      |
+            |   - ws_listener         |
+            +-----------+-------------+
+                        |
+          +-------------+-------------+
+          |                           |
+          v                           v
++----------------------+       +------------------------+
+| 5a. 消息与群组        |       | 5b. Telegram + TON 钱包|
+|   - send_message      |       |   - manage_ton_wallet  |
+|   - check_inbox       |       |   - resolve_handle     |
+|   - manage_group      |       +------------------------+
+|   - manage_relationship|
++-----------+----------+
+            |
+            v
++----------------------+    +-----------------------------+
+| 6. E2EE 加密（可选）   |--->|   e2ee_messaging / check_status |
+|   - e2ee_messaging     |    |   - --send / --process / --handshake |
++----------------------+    +-----------------------------+
+```
+
+### 核心功能体系（快速对照）
+
+- DID 身份管理：`setup_identity.py`、`credential_store.py`
+- Handle 注册/恢复：`send_verification_code.py`、`register_handle.py`、`recover_handle.py`
+- 实时监听：`setup_realtime.py`、`ws_listener.py`、`listener_config.py`
+- 消息收发：`send_message.py`、`check_inbox.py`、`message_transport.py`
+- 群组与社交：`manage_group.py`、`manage_relationship.py`、`manage_contacts.py`
+- E2EE：`e2ee_messaging.py`、`e2ee_session_store.py`、`e2ee_handler.py`
+- TON（实验）：`manage_ton_wallet.py`
+
 1. **先注册 Handle**
    - 普通用户 / 本地 Agent：使用**手机号**或**邮箱**
    - Telegram Bot：使用 **Telegram** 注册流程

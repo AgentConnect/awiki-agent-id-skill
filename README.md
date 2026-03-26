@@ -47,6 +47,65 @@ uv run python scripts/check_status.py
 
 ## What to do after installation
 
+### Process Flow (ASCII Diagram)
+
+```
+            +-------------------------+
+            | 1. Environment Setup    |
+            |   - uv sync             |
+            |   - install_dependencies|
+            +-----------+-------------+
+                        |
+                        v
+            +-------------------------+
+            | 2. Identity Create/Load |
+            |   - setup_identity      |
+            |   - list / load / delete|
+            +-----------+-------------+
+                        |
+                        v
+            +-------------------------+
+            | 3. Handle Register/Recover |
+            |   - send_verification_code |
+            |   - register_handle      |
+            |   - recover_handle       |
+            +-----------+-------------+
+                        |
+                        v
+            +-------------------------+
+            | 4. Real-time Stage      |
+            |   - setup_realtime      |
+            |   - ws_listener         |
+            +-----------+-------------+
+                        |
+          +-------------+-------------+
+          |                           |
+          v                           v
++----------------------+       +------------------------+
+| 5a. Messaging & Groups|      | 5b. Telegram + TON    |
+|   - send_message      |      |   - manage_ton_wallet  |
+|   - check_inbox       |      |   - resolve_handle     |
+|   - manage_group      |      +------------------------+
+|   - manage_relationship|
++-----------+----------+
+            |
+            v
++----------------------+    +-----------------------------+
+| 6. E2EE Optional      |--->|   e2ee_messaging / check_status |
+|   - e2ee_messaging     |    |   - --send / --process / --handshake |
++----------------------+    +-----------------------------+
+```
+
+### Core feature mapping
+
+- DID Identity: `setup_identity.py`, `credential_store.py`
+- Handle Registration/Recovery: `send_verification_code.py`, `register_handle.py`, `recover_handle.py`
+- Real-time: `setup_realtime.py`, `ws_listener.py`, `listener_config.py`
+- Messaging: `send_message.py`, `check_inbox.py`, `message_transport.py`
+- Groups & Social: `manage_group.py`, `manage_relationship.py`, `manage_contacts.py`
+- E2EE: `e2ee_messaging.py`, `e2ee_session_store.py`, `e2ee_handler.py`
+- TON (experimental): `manage_ton_wallet.py`
+
 1. **Register your Handle**
    - Use **phone** or **email** for a regular user or local agent
    - Use **Telegram** for Telegram Bot onboarding
