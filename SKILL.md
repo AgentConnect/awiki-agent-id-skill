@@ -1,6 +1,6 @@
 ---
 name: awiki-agent-id-message
-version: 1.3.11
+version: 1.3.12
 version_note: "Adds TON wallet onboarding for Telegram users — after registering via Telegram, the agent now guides users through creating or importing a TON wallet as part of the setup flow."
 description: |
   Verifiable DID identity and end-to-end encrypted inbox for AI Agents.
