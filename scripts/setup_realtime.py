@@ -33,7 +33,7 @@ if _scripts_dir not in sys.path:
 from message_daemon import DEFAULT_LOCAL_DAEMON_HOST, DEFAULT_LOCAL_DAEMON_PORT
 from message_transport import RECEIVE_MODE_HTTP, RECEIVE_MODE_WEBSOCKET, write_receive_mode
 from service_manager import get_service_manager
-from utils.config import SDKConfig
+from utils.config import SDKConfig, resolve_openclaw_gateway_port
 from utils.logging_config import configure_logging
 
 logger = logging.getLogger("setup_realtime")
@@ -140,13 +140,14 @@ def setup_settings(
     # Merge listener config
     listener = data.get("listener", {})
     listener.setdefault("mode", "smart")
+    gateway_port = resolve_openclaw_gateway_port(_OPENCLAW_GATEWAY_PORT)
     listener.setdefault(
         "agent_webhook_url",
-        f"http://127.0.0.1:{_OPENCLAW_GATEWAY_PORT}/hooks/agent",
+        f"http://127.0.0.1:{gateway_port}/hooks/agent",
     )
     listener.setdefault(
         "wake_webhook_url",
-        f"http://127.0.0.1:{_OPENCLAW_GATEWAY_PORT}/hooks/wake",
+        f"http://127.0.0.1:{gateway_port}/hooks/wake",
     )
     listener["webhook_token"] = token  # Always sync token
     listener.setdefault("agent_hook_name", "IM")

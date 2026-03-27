@@ -1,8 +1,10 @@
 """SDK configuration.
 
-[INPUT]: Environment variables, settings.json file
-[OUTPUT]: SDKConfig dataclass with credentials_dir, data_dir and load() classmethod
-[POS]: Centralized management of service URLs, domain configuration, credential directory, and data directory
+[INPUT]: Environment variables, settings.json file, openclaw.json
+[OUTPUT]: SDKConfig dataclass with credentials_dir, data_dir and load() classmethod;
+          resolve_openclaw_gateway_port() for dynamic port resolution
+[POS]: Centralized management of service URLs, domain configuration, credential directory, data directory,
+       and OpenClaw Gateway port resolution
 
 [PROTOCOL]:
 1. Update this header when logic changes
@@ -12,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -109,4 +112,46 @@ class SDKConfig:
         )
 
 
-__all__ = ["SDKConfig"]
+__all__ = ["SDKConfig", "resolve_openclaw_gateway_port"]
+
+
+_logger = logging.getLogger(__name__)
+
+# OpenClaw Gateway default port
+_DEFAULT_GATEWAY_PORT = 18789
+
+
+def _openclaw_config_path() -> Path:
+    """Return the path to OpenClaw's config file."""
+    env = os.environ.get("OPENCLAW_CONFIG_PATH")
+    if env:
+        return Path(env)
+    return Path.home() / ".openclaw" / "openclaw.json"
+
+
+def resolve_openclaw_gateway_port(default: int = _DEFAULT_GATEWAY_PORT) -> int:
+    """Resolve the OpenClaw Gateway port.
+
+    Priority: OPENCLAW_GATEWAY_PORT env > gateway.port in openclaw.json > default (18789).
+    """
+    # 1. Environment variable (highest priority we can read)
+    env_port = os.environ.get("OPENCLAW_GATEWAY_PORT")
+    if env_port:
+        try:
+            return int(env_port)
+        except ValueError:
+            _logger.warning("Invalid OPENCLAW_GATEWAY_PORT=%r, ignoring", env_port)
+
+    # 2. Read from openclaw.json
+    config_path = _openclaw_config_path()
+    if config_path.exists():
+        try:
+            data = json.loads(config_path.read_text(encoding="utf-8"))
+            gateway = data.get("gateway", {})
+            if isinstance(gateway, dict) and "port" in gateway:
+                return int(gateway["port"])
+        except (json.JSONDecodeError, OSError, ValueError, TypeError) as exc:
+            _logger.warning("Failed to read gateway.port from %s: %s", config_path, exc)
+
+    # 3. Default
+    return default
