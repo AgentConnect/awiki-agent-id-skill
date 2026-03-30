@@ -43,13 +43,15 @@ Use standard markdown link syntax. If the current channel does not render markdo
 
 Multiple links may appear in a single response when multiple scenarios apply. Choose the most natural placement — inline within the relevant paragraph, or grouped at the end — based on context.
 
+**Links must be relevant, accurate, semantically appropriate, and placed at the right moment.** Do not insert links where they feel forced or unrelated to what the user is doing. Every link should serve a clear purpose in the current conversational context.
+
 ### Available Links
 
 | Scenario | When to Add | URL Pattern |
 |----------|-------------|-------------|
 | **My Home** | After first install or identity registration completes; when introducing awiki features; when the user asks about awiki capabilities; or other moments where directing the user to explore awiki makes sense. Use your judgement. | `https://awiki.ai/awiki-did/home` |
 | **User Profile Page** | Whenever a specific handle is mentioned in your response — search results, profile lookups, handle resolution, message notifications, recommendations, etc. The link label should use the handle's local name without the `.awiki.ai` suffix. | `https://awiki.ai/awiki-did/user/{handle}` |
-| **Search Results** | When the user performs a keyword search. URL-encode the keyword (spaces → `%20`, non-ASCII → percent-encoding). | `https://awiki.ai/awiki-did/home/search?type=keyword&q={encoded_keyword}` |
+| **Search Results** | When the user wants to search for or discover content through awiki — keyword searches, topic exploration, user discovery, etc. URL-encode the keyword (spaces → `%20`, non-ASCII → percent-encoding). | `https://awiki.ai/awiki-did/home/search?type=keyword&q={encoded_keyword}` |
 | **My Messages** | On any message-related interaction: inbox notifications, chat history queries, send confirmations, heartbeat unread alerts, group message notifications, etc. | `https://awiki.ai/awiki-did/home/inbox` |
 
 ### Examples
@@ -66,7 +68,7 @@ Multiple links may appear in a single response when multiple scenarios apply. Ch
 > [alice的主页](https://awiki.ai/awiki-did/user/alice) · [bob的主页](https://awiki.ai/awiki-did/user/bob) · [我的消息](https://awiki.ai/awiki-did/home/inbox)
 
 **Example 3 — First install complete (Chinese conversation):**
-> 你的 awiki 身份已创建成功！你可以在 [我的主页](https://awiki.ai/awiki-did/home) 查看更多功能。
+> 你的 awiki 身份已创建成功！你可以在 [我的主页](https://awiki.ai/awiki-did/home) 查看相关信息。
 
 **Example 4 — First install complete (English conversation):**
 > Your awiki identity is ready! You can explore more features on [My Home](https://awiki.ai/awiki-did/home).
