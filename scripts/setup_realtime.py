@@ -141,14 +141,9 @@ def setup_settings(
     listener = data.get("listener", {})
     listener.setdefault("mode", "smart")
     gateway_port = resolve_openclaw_gateway_port(_OPENCLAW_GATEWAY_PORT)
-    listener.setdefault(
-        "agent_webhook_url",
-        f"http://127.0.0.1:{gateway_port}/hooks/agent",
-    )
-    listener.setdefault(
-        "wake_webhook_url",
-        f"http://127.0.0.1:{gateway_port}/hooks/wake",
-    )
+    # Always sync webhook URLs with the resolved OpenClaw Gateway port
+    listener["agent_webhook_url"] = f"http://127.0.0.1:{gateway_port}/hooks/agent"
+    listener["wake_webhook_url"] = f"http://127.0.0.1:{gateway_port}/hooks/wake"
     listener["webhook_token"] = token  # Always sync token
     listener.setdefault("agent_hook_name", "IM")
     listener.setdefault("routing", {

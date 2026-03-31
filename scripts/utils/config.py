@@ -138,7 +138,12 @@ def resolve_openclaw_gateway_port(default: int = _DEFAULT_GATEWAY_PORT) -> int:
     env_port = os.environ.get("OPENCLAW_GATEWAY_PORT")
     if env_port:
         try:
-            return int(env_port)
+            port = int(env_port)
+            _logger.info(
+                "Using OpenClaw Gateway port from OPENCLAW_GATEWAY_PORT env: %d",
+                port,
+            )
+            return port
         except ValueError:
             _logger.warning("Invalid OPENCLAW_GATEWAY_PORT=%r, ignoring", env_port)
 
@@ -149,9 +154,20 @@ def resolve_openclaw_gateway_port(default: int = _DEFAULT_GATEWAY_PORT) -> int:
             data = json.loads(config_path.read_text(encoding="utf-8"))
             gateway = data.get("gateway", {})
             if isinstance(gateway, dict) and "port" in gateway:
-                return int(gateway["port"])
+                port = int(gateway["port"])
+                _logger.info(
+                    "Detected OpenClaw Gateway port from %s: %d",
+                    config_path,
+                    port,
+                )
+                return port
         except (json.JSONDecodeError, OSError, ValueError, TypeError) as exc:
-            _logger.warning("Failed to read gateway.port from %s: %s", config_path, exc)
+            _logger.warning(
+                "Failed to read gateway.port from %s: %s",
+                config_path,
+                exc,
+            )
 
     # 3. Default
+    _logger.info("Using default OpenClaw Gateway port: %d", default)
     return default

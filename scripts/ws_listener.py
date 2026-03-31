@@ -6,8 +6,8 @@
          E2eeHandler, service_manager, local_store, logging_config, local daemon
          settings, authenticated HTTP fallback for secondary credentials, and
          indexed credential discovery for newly created identities
-[OUTPUT]: WebSocket -> OpenClaw TUI bridge (chat.inject RPC for instant display,
-          HTTP webhook fallback, and fan-out to all active external channels)
+[OUTPUT]: WebSocket -> OpenClaw HTTP hooks bridge (/hooks/agent for agent mode
+          with fan-out to all active external channels)
           + localhost message daemon for CLI message RPC proxying +
           cross-platform service lifecycle management + local SQLite
           message/group persistence + sender-handle-aware channel text
@@ -21,7 +21,8 @@
 2. Check the folder's CLAUDE.md after updating
 
 Core pipeline:
-  molt-message WS push -> listener receives -> E2EE intercept/decrypt -> route classification -> chat.inject to TUI
+  molt-message WS push -> listener receives -> E2EE intercept/decrypt -> route
+  classification -> HTTP /hooks/agent delivery via OpenClaw gateway
   local CLI RPC -> localhost daemon -> single remote WsClient.send_rpc() connection
 
 Subcommands:
@@ -887,7 +888,7 @@ async def _forward(
     channels: list[tuple[str, str]] | None = None,
     msg_seq: int = 0,
 ) -> bool:
-    """Forward a message to OpenClaw via ``chat.inject`` + HTTP ``/hooks/agent``."""
+    """Forward a message to OpenClaw via HTTP ``/hooks/agent``."""
     e2ee_tag = "[E2EE] " if params.get("_e2ee") else ""
     sender = _truncate_did(params.get("sender_did", "unknown"))
     text = _build_event_text(params, route, cfg)
@@ -898,44 +899,10 @@ async def _forward(
     )
     tag = f"[#{msg_seq}] " if msg_seq else ""
 
-    # Primary: chat.inject (direct TUI injection, no model call)
     delivery_ok = False
-    inject_params = json.dumps(
-        {"sessionKey": "agent:main:main", "message": text},
-        ensure_ascii=False,
-    )
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            _OPENCLAW_BIN, "gateway", "call", "chat.inject",
-            "--params", inject_params, "--json",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
-        stdout_str = stdout.decode().strip() if stdout else ""
 
-        if proc.returncode == 0 and "ok" in stdout_str.lower():
-            logger.info(
-                "%s%sTUI OK (chat.inject) sender=%s",
-                tag, e2ee_tag, sender,
-            )
-            delivery_ok = True
-        else:
-            stderr_str = stderr.decode().strip() if stderr else ""
-            logger.warning(
-                "%s%sTUI FAIL (chat.inject) exit=%d stderr=%s",
-                tag, e2ee_tag, proc.returncode, stderr_str[:200],
-            )
-    except asyncio.TimeoutError:
-        logger.warning("%sTUI FAIL (chat.inject) timeout", tag)
-    except FileNotFoundError:
-        logger.warning("openclaw CLI not found at %s", _OPENCLAW_BIN)
-    except Exception as exc:
-        logger.error("%sTUI FAIL (chat.inject) %s", tag, exc)
-
-    # Secondary: HTTP agent-hook delivery. One request is sent per active
-    # external channel so OpenClaw can deliver the agent response back to that
-    # channel directly.
+    # HTTP agent-hook delivery. One request is sent per active external channel
+    # so OpenClaw can deliver the agent response back to that channel directly.
     headers: dict[str, str] = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
