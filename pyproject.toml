@@ -6,4 +6,7 @@ requires-python = ">=3.10"
 dependencies = [
     "anp>=0.6.8",
     "httpx>=0.28.0",
+    "pytoniq>=0.1.40",
+    "pytoniq-core>=0.1.40",
+    "cryptography>=42.0.0",
 ]

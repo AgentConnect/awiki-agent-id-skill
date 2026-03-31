@@ -18,7 +18,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from utils.config import SDKConfig
+from utils.config import SDKConfig, resolve_openclaw_gateway_port
 
 logger = logging.getLogger(__name__)
 
@@ -168,11 +168,12 @@ class ListenerConfig:
             blacklist_dids=frozenset(routing_data.get("blacklist_dids", [])),
         )
 
-        # 5. Build ListenerConfig
+        # 5. Build ListenerConfig (resolve gateway port for fallback URLs)
+        _gw_port = resolve_openclaw_gateway_port()
         result = cls(
             mode=data.get("mode", "smart"),
-            agent_webhook_url=data.get("agent_webhook_url", "http://127.0.0.1:18789/hooks/agent"),
-            wake_webhook_url=data.get("wake_webhook_url", "http://127.0.0.1:18789/hooks/wake"),
+            agent_webhook_url=data.get("agent_webhook_url", f"http://127.0.0.1:{_gw_port}/hooks/agent"),
+            wake_webhook_url=data.get("wake_webhook_url", f"http://127.0.0.1:{_gw_port}/hooks/wake"),
             webhook_token=data.get("webhook_token", ""),
             agent_hook_name=data.get("agent_hook_name", "IM"),
             routing=routing,

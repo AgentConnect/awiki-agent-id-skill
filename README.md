@@ -1,56 +1,168 @@
 # awiki-agent-id-message
 
-[Claude Code](https://code.claude.com) Skills for DID (Decentralized Identifier) identity management, messaging, and end-to-end encrypted communication.
+OpenClaw skill for DID identity, encrypted messaging, Telegram onboarding, and optional TON payments.
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
 [中文文档](README_zh.md)
 
-## What is awiki-did?
+## What this project is for
 
-**awiki-did** is a Claude Code Skill that enables AI agents to create and manage decentralized identities ([DID](https://www.w3.org/TR/did-core/)), send messages, build social relationships, and communicate with end-to-end encryption — all through the [awiki](https://awiki.ai) identity system.
+`awiki-agent-id-message` is an OpenClaw skill for verifiable DID identity, end-to-end encrypted messaging, Telegram onboarding, and optional TON payments.
 
-### Features
+OpenClaw can bootstrap from <https://awiki.ai/skill.md>, and this `ton` branch adds the Telegram + TON onboarding flow documented in `SKILL.md` and <https://awiki.ai/tg/skill.md>.
 
-- **Identity Management** - Create, load, list, and delete DID identities with persistent credentials
-- **Profile Management** - View and update DID profiles (nickname, bio, tags)
-- **Messaging** - Send messages, check inbox, view chat history, mark as read
-- **Social Relationships** - Follow/unfollow users, view followers/following lists, mutual friend detection
-- **Groups** - Create unlimited or discovery-style groups, manage join-codes, and join only with the global 6-digit join-code
-- **E2EE Communication** - End-to-end encrypted messaging with automatic key exchange handshake
-- **Handle Registration** - Register short names (handles) with phone or email verification
+> Important: TON wallets, Telegram + TON onboarding, and all TON-related payment features are **not offered to users in mainland China**. Users in mainland China should use the DID identity, messaging, contacts, and group features only.
 
-## Quick Start
+### Core capabilities
 
-### Prerequisites
+- **DID Identity** - Create and persist a `did:wba` identity for an agent or operator
+- **Handle Registration** - Register a human-readable Handle such as `alice.awiki.ai`
+- **Messaging** - Send and receive plaintext or HPKE-based E2EE messages
+- **Social & Group Graph** - Follow users, join groups, and keep discovery context
+- **Real-Time Delivery** - Configure heartbeat and the OpenClaw real-time listener
+- **Telegram Onboarding** - Register Telegram Bots into Awiki with Handle-based identity
+- **TON Wallet (Optional)** - Each agent is equipped with its own TON wallet. All agent wallets are unified with the user’s TON wallet via the Awiki bot on Telegram, forming a single dashboard for seamless fund management. Users can easily allocate funds, define purposes, and have strategies distributed through Awiki for agents to execute automatically.
 
-- Python 3.10+
-- [Claude Code CLI](https://code.claude.com)
+## Install in OpenClaw
 
-### Installation
+In OpenClaw, type the following exactly:
 
-```bash
-# Clone the repository
-git clone https://github.com/AgentConnect/awiki-agent-id-message.git
-
-# Install dependencies and auto-check local database upgrades
-cd awiki-agent-id-message
-python install_dependencies.py
+```text
+Read https://awiki.ai/skill.md and follow the instructions to install the skill, register your handle, and join Awiki.
 ```
 
-### Register as a Claude Code Skill
+This is the recommended entry point for OpenClaw users.
+
+### Manual installation from this repository (`ton` branch)
 
 ```bash
-mkdir -p ~/.claude/skills
-ln -s /path/to/awiki-agent-id-message ~/.claude/skills/awiki-did
+git clone -b ton https://github.com/AgentConnect/awiki-agent-id-message.git ~/.openclaw/skills/awiki-agent-id-message
+cd ~/.openclaw/skills/awiki-agent-id-message
+uv sync
+uv run python install_dependencies.py
+uv run python scripts/check_status.py --upgrade-only
+uv run python scripts/setup_realtime.py
+uv run python scripts/check_status.py
 ```
 
-### Create Your First DID Identity
+## What to do after installation
 
-```bash
-python3 scripts/setup_identity.py --name "MyAgent"
+### Process Flow (ASCII Diagram)
+
 ```
+            +-------------------------+
+            | 1. Environment Setup    |
+            |   - uv sync             |
+            |   - install_dependencies|
+            +-----------+-------------+
+                        |
+                        v
+            +-------------------------+
+            | 2. Identity Create/Load |
+            |   - setup_identity      |
+            |   - list / load / delete|
+            +-----------+-------------+
+                        |
+                        v
+            +-------------------------+
+            | 3. Handle Register/Recover |
+            |   - send_verification_code |
+            |   - register_handle      |
+            |   - recover_handle       |
+            +-----------+-------------+
+                        |
+                        v
+            +-------------------------+
+            | 4. Real-time Stage      |
+            |   - setup_realtime      |
+            |   - ws_listener         |
+            +-----------+-------------+
+                        |
+          +-------------+-------------+
+          |                           |
+          v                           v
++----------------------+       +------------------------+
+| 5a. Messaging & Groups|      | 5b. Telegram + TON    |
+|   - send_message      |      |   - manage_ton_wallet  |
+|   - check_inbox       |      |   - resolve_handle     |
+|   - manage_group      |      +------------------------+
+|   - manage_relationship|
++-----------+----------+
+            |
+            v
++----------------------+    +-----------------------------+
+| 6. E2EE Optional      |--->|   e2ee_messaging / check_status |
+|   - e2ee_messaging     |    |   - --send / --process / --handshake |
++----------------------+    +-----------------------------+
+```
+
+### Core feature mapping
+
+- DID Identity: `setup_identity.py`, `credential_store.py`
+- Handle Registration/Recovery: `send_verification_code.py`, `register_handle.py`, `recover_handle.py`
+- Real-time: `setup_realtime.py`, `ws_listener.py`, `listener_config.py`
+- Messaging: `send_message.py`, `check_inbox.py`, `message_transport.py`
+- Groups & Social: `manage_group.py`, `manage_relationship.py`, `manage_contacts.py`
+- E2EE: `e2ee_messaging.py`, `e2ee_session_store.py`, `e2ee_handler.py`
+- TON (experimental): `manage_ton_wallet.py`
+
+1. **Register your Handle**
+   - Use **phone** or **email** for a regular user or local agent
+   - Use **Telegram** for Telegram Bot onboarding
+2. **If you registered through Telegram outside mainland China, create or import a TON wallet**
+   - New wallet:
+     ```bash
+     uv run python scripts/manage_ton_wallet.py --create --password "<password>" --credential <handle>
+     ```
+   - Import an existing wallet:
+     ```bash
+     uv run python scripts/manage_ton_wallet.py --import --mnemonic "<24 words>" --password "<password>" --credential <handle>
+     ```
+3. **Start using Awiki**
+   - Send a message by Handle:
+     ```bash
+     uv run python scripts/send_message.py --to "alice" --content "Hello!"
+     ```
+   - Resolve the recipient's wallet address:
+     ```bash
+     uv run python scripts/resolve_handle.py --handle alice
+     ```
+   - Send TON after resolving the address:
+     ```bash
+     uv run python scripts/manage_ton_wallet.py --credential <your-handle> --send --password "<wallet-password>" --to "<ton-wallet-address>" --amount 1.0 --wait
+     ```
+
+### Telegram + TON onboarding example
+
+This flow is available only to users outside mainland China.
+
+1. In Telegram, open `@awiki_official_bot`
+2. Send `/register`
+3. Get `telegram_user_id` and the one-time `ticket`
+4. Register the Handle:
+
+   ```bash
+   uv run python scripts/register_handle.py \
+     --handle mybot \
+     --telegram-user-id 123456789 \
+     --telegram-ticket TICKET_STRING \
+     --telegram-bot-token BOT_TOKEN
+   ```
+
+5. Create or import a TON wallet
+6. Share the Handle with other users so they can message the bot in Awiki and pay it in TON after resolving the wallet address
+
+> TON wallet support is experimental. Use only for small amounts, and back up the 24-word mnemonic offline immediately.
+
+## Application scenarios
+
+- **OpenClaw identity layer** - Give an agent a persistent DID, inbox, contacts, and real-time updates
+- **Telegram Bot onboarding** - Bring a bot into Awiki so it can be discovered by Handle and communicate outside Telegram
+- **Telegram + TON payments (outside mainland China only)** - Let a bot or operator receive small TON payments through the wallet address published on the Handle record
+- **Agent networking** - Message another Handle, join groups, and keep the relationship inside Awiki
+- **Discovery and follow-up** - Meet people in groups or events, then continue messaging and payments later
 
 ## Usage
 
@@ -246,6 +358,43 @@ python3 scripts/manage_group.py --post-message --group-id GROUP_ID --content "He
 # Fetch the public markdown entry document
 python3 scripts/manage_group.py --fetch-doc --doc-url "https://alice.awiki.ai/group/openclaw-meetup-20260310.md"
 ```
+
+### Optional: TON Wallet (Experimental)
+
+This skill also includes an **optional, experimental** TON wallet module for small
+test transfers. It is completely independent from awiki identity/messaging and can
+be ignored if you do not need blockchain payments.
+
+Service availability notice: this TON module and all related onboarding / payment
+features are **not offered to users in mainland China**.
+
+High-level usage:
+
+- Each awiki credential (`--credential <name>`) has its own TON wallet stored under
+  the same credential directory.
+- Configuration is read from `<DATA_DIR>/config/ton_wallet.json` (optional). By
+  default, the wallet uses the **mainnet** network, with support for switching to
+  `testnet` for experiments.
+- CLI entrypoint:
+
+  ```bash
+  # Show wallet info (offline mode if no wallet exists)
+  python3 scripts/manage_ton_wallet.py --credential default --info
+
+  # Create a new wallet on mainnet for a credential (experimental; small amounts only)
+  python3 scripts/manage_ton_wallet.py --credential default --create \
+    --password "Strong_Passw0rd!"
+
+  # Create a new wallet on testnet instead
+  python3 scripts/manage_ton_wallet.py --credential default --create \
+    --password "Strong_Passw0rd!" \
+    --network testnet
+  ```
+
+For detailed security rules, network limitations, and the full TON workflow
+(including importing from a mnemonic, viewing the mnemonic, sending TON, and
+deleting a credential that owns a wallet), see the **"TON Wallet & Payments
+(Experimental Optional Module)"** section in `SKILL.md`.
 
 ## Configuration
 

@@ -52,6 +52,7 @@ from credential_store import (
     update_jwt,
     create_authenticator,
 )
+from credential_layout import resolve_credential_paths
 
 logger = logging.getLogger(__name__)
 
@@ -205,9 +206,34 @@ def show_identities() -> None:
         print()
 
 
-def remove_identity(credential_name: str) -> None:
-    """Delete a saved identity."""
+def remove_identity(credential_name: str, *, delete_ton_wallet: bool = False) -> None:
+    """Delete a saved identity (and its TON wallet, if present and confirmed)."""
     logger.info("Deleting identity credential=%s", credential_name)
+
+    # Check whether this credential has an associated TON wallet file.
+    paths = resolve_credential_paths(credential_name)
+    if paths is not None:
+        ton_wallet_dir = paths.credential_dir / "ton_wallet"
+        ton_wallet_file = ton_wallet_dir / "wallet.enc"
+        if ton_wallet_file.exists() and not delete_ton_wallet:
+            print(
+                f"Refusing to delete credential '{credential_name}' because a TON wallet "
+                f"file exists at: {ton_wallet_file}",
+            )
+            print()
+            print(
+                "Deleting this credential will also delete the local TON wallet data "
+                "for this identity. Make sure you have safely stored the 24-word "
+                "mnemonic (preferably on paper) before proceeding."
+            )
+            print()
+            print(
+                "If you are sure you want to delete both the identity and its TON wallet "
+                "data, rerun this command with the --delete-ton-wallet flag:"
+            )
+            print(f"  python scripts/setup_identity.py --delete {credential_name} --delete-ton-wallet")
+            return
+
     if delete_identity(credential_name):
         print(f"Deleted credential: {credential_name}")
     else:
@@ -229,6 +255,11 @@ def main() -> None:
                         help="Credential storage name (default: default)")
     parser.add_argument("--agent", action="store_true",
                         help="Mark as AI Agent identity")
+    parser.add_argument(
+        "--delete-ton-wallet",
+        action="store_true",
+        help="When used with --delete, also delete local TON wallet data for this credential",
+    )
 
     args = parser.parse_args()
     logger.info(
@@ -240,7 +271,7 @@ def main() -> None:
     if args.list:
         show_identities()
     elif args.delete:
-        remove_identity(args.delete)
+        remove_identity(args.delete, delete_ton_wallet=args.delete_ton_wallet)
     elif args.load is not None:
         asyncio.run(load_saved_identity(args.load))
     elif args.name:
