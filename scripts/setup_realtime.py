@@ -217,10 +217,18 @@ def setup_listener_service(credential: str) -> dict[str, Any]:
     current = mgr.status()
 
     if current.get("running"):
+        # Service is already running but settings/openclaw config may have
+        # changed. Restart the listener so the new configuration takes effect.
+        try:
+            mgr.stop()
+        except Exception:  # noqa: BLE001
+            logger.debug("Failed to stop listener before restart", exc_info=True)
+        mgr.start()
+        new_status = mgr.status()
         return {
             "status": "ok",
-            "action": "already_running",
-            "detail": current,
+            "action": "restarted",
+            "detail": new_status,
         }
 
     if current.get("installed"):
