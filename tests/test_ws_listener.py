@@ -1062,3 +1062,56 @@ def test_forward_uses_dynamic_gateway_port_for_localhost(
 
     assert result is True
     assert http.calls and http.calls[0]["url"].endswith(":25307/hooks/agent")
+
+
+def test_credential_ws_supervisor_maps_default_alias_to_default_credential(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The 'default' argparse alias should resolve to the configured default credential."""
+    # Simulate an index with three credentials where default_credential_name=zhuocheng.
+    identities_snapshot = {
+        "zhuocheng": {"did": "did:wba:awiki.ai:zhuocheng:k1_XFS2r"},
+        "zhuocheng66666": {"did": "did:wba:awiki.ai:zhuocheng66666:k1_xwDR"},
+        "support": {"did": "did:wba:awiki.ai:support:k1_Wap7"},
+    }
+
+    async def _fake_listen_loop(
+        credential_name: str,
+        cfg: object,
+        config: SDKConfig | None = None,
+        rpc_proxy: ws_listener._ActiveWsRpcProxy | None = None,
+    ) -> None:
+        del cfg, config, rpc_proxy
+        # Never actually run; supervisor should only schedule one task per DID.
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(ws_listener, "listen_loop", _fake_listen_loop)
+    monkeypatch.setattr(ws_listener, "list_identities_by_name", lambda: identities_snapshot)
+    # get_index_entry("default") should resolve to the zhuocheng entry.
+    monkeypatch.setattr(
+        ws_listener,
+        "get_index_entry",
+        lambda name, config=None: (
+            {"credential_name": "zhuocheng", "did": "did:wba:awiki.ai:zhuocheng:k1_XFS2r"}
+            if name == "default"
+            else None
+        ),
+    )
+
+    async def _run() -> None:
+        supervisor = ws_listener._CredentialWsSupervisor(
+            cfg=object(),
+            config=_build_config(tmp_path),
+        )
+        try:
+            # primary_credential="default" should not start a separate session
+            # from the underlying "zhuocheng" credential.
+            started = await supervisor.sync_known_credentials("default")
+            # Only one canonical credential should be started for DID=zhuocheng
+            # plus the other two independent DIDs.
+            assert sorted(started) == ["default", "support", "zhuocheng66666"]
+        finally:
+            await supervisor.close()
+
+    asyncio.run(_run())

@@ -63,6 +63,7 @@ from check_inbox import (
     _store_inbox_messages,
 )
 from credential_store import create_authenticator, list_identities_by_name, load_identity, update_jwt
+from credential_layout import get_index_entry
 from credential_layout import (
     ensure_credential_directory,
     resolve_credential_paths,
@@ -208,6 +209,22 @@ class _CredentialWsSupervisor:
             if not isinstance(did, str) or not did:
                 continue
             did_to_names.setdefault(did, []).append(credential_name)
+
+        # Link the special argparse default alias to its configured default
+        # credential when present. The "default" credential name is not stored
+        # as a separate entry in the index; instead, credential_layout
+        # resolves it to the entry referenced by default_credential_name. We
+        # treat "default" as an alias for that canonical credential so a DID
+        # shared between "default" and its underlying credential only creates
+        # one WebSocket session.
+        try:
+            default_entry = get_index_entry("default")
+        except Exception:  # noqa: BLE001
+            default_entry = None
+        if default_entry is not None:
+            did = default_entry.get("did")
+            if isinstance(did, str) and did:
+                did_to_names.setdefault(did, []).append("default")
 
         alias_map: dict[str, str] = {}
         for did, names in did_to_names.items():
