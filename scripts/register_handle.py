@@ -30,6 +30,7 @@ import asyncio
 import logging
 import sys
 
+from credential_store import delete_identity, list_identities, load_identity, save_identity
 from utils import SDKConfig, create_user_service_client, register_handle
 from utils.cli_errors import exit_with_cli_error
 from utils.handle import (
@@ -37,7 +38,6 @@ from utils.handle import (
     register_handle_with_email,
 )
 from utils.logging_config import configure_logging
-from credential_store import save_identity
 
 logger = logging.getLogger(__name__)
 PENDING_VERIFICATION_EXIT_CODE = 3
@@ -106,6 +106,33 @@ async def do_register(
         print(f"  unique_id : {identity.unique_id}")
         print(f"  user_id   : {identity.user_id}")
         print(f"  JWT token : {identity.jwt_token[:50]}...")
+
+        # Before saving, clean up any stale local credentials bound to the same handle.
+        # This avoids conflicts when the handle has been re-registered on the server
+        # side but older local credentials still reference an obsolete DID.
+        normalized_handle = handle
+        try:
+            identities = list_identities()
+        except Exception:  # noqa: BLE001
+            identities = []
+
+        for entry in identities:
+            entry_handle = str(entry.get("handle") or "")
+            entry_name = str(entry.get("credential_name") or "")
+            if entry_handle == normalized_handle and entry_name != credential_name:
+                delete_identity(entry_name)
+                print(
+                    f"Deleted existing local credential '{entry_name}' "
+                    f"for handle '{normalized_handle}' (stale before new registration)."
+                )
+
+        existing = load_identity(credential_name)
+        if existing is not None and existing.get("did") != identity.did:
+            delete_identity(credential_name)
+            print(
+                f"Replaced stale local credential '{credential_name}' which previously "
+                f"pointed to DID {existing.get('did')} with new DID {identity.did}."
+            )
 
         # Save credential
         path = save_identity(

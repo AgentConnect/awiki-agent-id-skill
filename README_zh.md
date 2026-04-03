@@ -126,6 +126,11 @@ python scripts/register_handle.py --handle bob --phone +8613800138000 --otp-code
 python scripts/recover_handle.py --handle alice --phone +8613800138000 --otp-code 123456
 ```
 
+对于 Handle 注销（`unregister_handle.py`），后端会在请求注销时，**同时向该 Handle
+绑定的所有渠道（手机号和邮箱）发送相同的数字验证码**。你可以从任意一个渠道
+（短信或邮箱）获取这条验证码，并通过 `--code <验证码>` 传给
+`unregister_handle.py` 完成确认步骤。
+
 ### 消息通信
 
 ```bash
