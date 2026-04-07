@@ -24,14 +24,13 @@ import logging
 import sys
 import uuid
 
+from credential_store import create_authenticator
+import local_store
 from utils import SDKConfig, resolve_to_did
 from utils.logging_config import configure_logging
-from credential_store import create_authenticator
 from message_transport import message_rpc_call
-import local_store
 
 
-MESSAGE_RPC = "/message/rpc"
 logger = logging.getLogger(__name__)
 
 
@@ -66,18 +65,25 @@ async def send_message(
         sys.exit(1)
 
     _auth, data = auth_result
+    params = {
+        k: v
+        for k, v in {
+            "sender_did": data["did"],
+            "receiver_did": receiver_did,
+            "content": content,
+            "title": title,
+            "type": msg_type,
+            "client_msg_id": str(uuid.uuid4()),
+        }.items()
+        if v is not None
+    }
+
+    # Delegate transport selection to message_transport so WebSocket-mode
+    # environments can route via the local daemon while HTTP-mode environments
+    # call the remote molt-message service directly.
     result = await message_rpc_call(
         "send",
-        params={
-            k: v for k, v in {
-                "sender_did": data["did"],
-                "receiver_did": receiver_did,
-                "content": content,
-                "title": title,
-                "type": msg_type,
-                "client_msg_id": str(uuid.uuid4()),
-            }.items() if v is not None
-        },
+        params=params,
         credential_name=credential_name,
         config=config,
     )

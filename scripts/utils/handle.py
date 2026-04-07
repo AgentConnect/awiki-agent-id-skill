@@ -28,7 +28,7 @@ import httpx
 
 from utils.config import SDKConfig
 from utils.identity import DIDIdentity, create_identity
-from utils.rpc import JsonRpcError, rpc_call
+from utils.rpc import JsonRpcError, rpc_call, authenticated_rpc_call
 from utils.auth import get_jwt_via_wba
 
 
@@ -580,6 +580,76 @@ async def lookup_handle(
     return await rpc_call(client, HANDLE_RPC, "lookup", {"did": did})
 
 
+async def request_handle_revoke(
+    client: httpx.AsyncClient,
+    handle: str,
+    *,
+    auth: Any | None = None,
+    credential_name: str = "default",
+) -> dict[str, Any]:
+    """Request handle revoke by sending a verification code to all bound channels.
+
+    Args:
+        client: HTTP client pointing to user-service (must carry DID/JWT auth).
+        handle: Handle local-part to revoke.
+
+    Returns:
+        Result dict with {"sent": int, "skipped": int}.
+
+    Notes:
+        - When auth is provided, uses authenticated_rpc_call() with DIDWbaAuthHeader.
+        - When auth is None, falls back to rpc_call() and relies on caller to
+          configure client headers (mainly for backward compatibility).
+    """
+    params = {"handle": handle}
+    if auth is not None:
+        return await authenticated_rpc_call(
+            client,
+            HANDLE_RPC,
+            "request_revoke",
+            params,
+            auth=auth,
+            credential_name=credential_name,
+        )
+    return await rpc_call(client, HANDLE_RPC, "request_revoke", params)
+
+
+async def confirm_handle_revoke(
+    client: httpx.AsyncClient,
+    handle: str,
+    code: str,
+    *,
+    auth: Any | None = None,
+    credential_name: str = "default",
+) -> dict[str, Any]:
+    """Confirm handle revoke with a numeric verification code.
+
+    Args:
+        client: HTTP client pointing to user-service (must carry DID/JWT auth).
+        handle: Handle local-part to revoke.
+        code: Verification code received via SMS/email.
+
+    Returns:
+        Result dict, expected to contain {"ok": true} on success.
+
+    Notes:
+        - When auth is provided, uses authenticated_rpc_call() with DIDWbaAuthHeader.
+        - When auth is None, falls back to rpc_call() and relies on caller to
+          configure client headers.
+    """
+    payload = {"handle": handle, "code": _sanitize_otp(code)}
+    if auth is not None:
+        return await authenticated_rpc_call(
+            client,
+            HANDLE_RPC,
+            "confirm_revoke",
+            payload,
+            auth=auth,
+            credential_name=credential_name,
+        )
+    return await rpc_call(client, HANDLE_RPC, "confirm_revoke", payload)
+
+
 __all__ = [
     "EmailVerificationResult",
     "normalize_phone",
@@ -593,6 +663,8 @@ __all__ = [
     "recover_handle",
     "resolve_handle",
     "lookup_handle",
+    "request_handle_revoke",
+    "confirm_handle_revoke",
     "bind_email_send",
     "bind_phone_send_otp",
     "bind_phone_verify",

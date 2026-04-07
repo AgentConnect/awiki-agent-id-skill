@@ -215,24 +215,23 @@ class TestSocialPersistence:
     ) -> None:
         del temp_local_db
         monkeypatch.setattr(
-            send_message_cli,
-            "resolve_to_did",
-            lambda receiver, config: asyncio.sleep(0, result="did:bob"),
+            send_message_cli, "resolve_to_did", lambda receiver, config: asyncio.sleep(0, result="did:bob")
         )
         monkeypatch.setattr(
-            send_message_cli,
-            "create_authenticator",
-            lambda credential_name, config: (object(), {"did": "did:alice"}),
-        )
-        monkeypatch.setattr(
-            send_message_cli,
-            "create_molt_message_client",
-            lambda config: _AsyncClientContext(object()),
+            send_message_cli, "create_authenticator", lambda credential_name, config: (object(), {"did": "did:alice"})
         )
 
-        async def _fake_rpc_call(client, endpoint, method, params, auth, credential_name):
-            del client, endpoint, auth, credential_name
+        async def _fake_message_rpc_call(
+            method: str,
+            params: dict[str, object] | None = None,
+            *,
+            credential_name: str,
+            config: object,
+            force_mode: str | None = None,
+        ) -> dict[str, object]:
+            del config, force_mode
             assert method == "send"
+            assert params is not None
             assert params["receiver_did"] == "did:bob"
             return {
                 "id": "msg_1",
@@ -240,7 +239,7 @@ class TestSocialPersistence:
                 "sent_at": "2026-03-10T12:00:00+00:00",
             }
 
-        monkeypatch.setattr(send_message_cli, "authenticated_rpc_call", _fake_rpc_call)
+        monkeypatch.setattr(send_message_cli, "message_rpc_call", _fake_message_rpc_call)
 
         asyncio.run(
             send_message_cli.send_message(

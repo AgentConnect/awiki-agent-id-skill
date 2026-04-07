@@ -33,7 +33,7 @@ if _scripts_dir not in sys.path:
 from message_daemon import DEFAULT_LOCAL_DAEMON_HOST, DEFAULT_LOCAL_DAEMON_PORT
 from message_transport import RECEIVE_MODE_HTTP, RECEIVE_MODE_WEBSOCKET, write_receive_mode
 from service_manager import get_service_manager
-from utils.config import SDKConfig
+from utils.config import SDKConfig, resolve_openclaw_gateway_port
 from utils.logging_config import configure_logging
 
 logger = logging.getLogger("setup_realtime")
@@ -140,14 +140,10 @@ def setup_settings(
     # Merge listener config
     listener = data.get("listener", {})
     listener.setdefault("mode", "smart")
-    listener.setdefault(
-        "agent_webhook_url",
-        f"http://127.0.0.1:{_OPENCLAW_GATEWAY_PORT}/hooks/agent",
-    )
-    listener.setdefault(
-        "wake_webhook_url",
-        f"http://127.0.0.1:{_OPENCLAW_GATEWAY_PORT}/hooks/wake",
-    )
+    gateway_port = resolve_openclaw_gateway_port(_OPENCLAW_GATEWAY_PORT)
+    # Always sync webhook URLs with the resolved OpenClaw Gateway port
+    listener["agent_webhook_url"] = f"http://127.0.0.1:{gateway_port}/hooks/agent"
+    listener["wake_webhook_url"] = f"http://127.0.0.1:{gateway_port}/hooks/wake"
     listener["webhook_token"] = token  # Always sync token
     listener.setdefault("agent_hook_name", "IM")
     listener.setdefault("routing", {
@@ -221,10 +217,18 @@ def setup_listener_service(credential: str) -> dict[str, Any]:
     current = mgr.status()
 
     if current.get("running"):
+        # Service is already running but settings/openclaw config may have
+        # changed. Restart the listener so the new configuration takes effect.
+        try:
+            mgr.stop()
+        except Exception:  # noqa: BLE001
+            logger.debug("Failed to stop listener before restart", exc_info=True)
+        mgr.start()
+        new_status = mgr.status()
         return {
             "status": "ok",
-            "action": "already_running",
-            "detail": current,
+            "action": "restarted",
+            "detail": new_status,
         }
 
     if current.get("installed"):

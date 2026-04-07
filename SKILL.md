@@ -189,6 +189,18 @@ cd <SKILL_DIR> && python scripts/resolve_handle.py --did "did:wba:awiki.ai:alice
 # Recover a lost Handle (original phone + new DID)
 cd <SKILL_DIR> && python scripts/send_verification_code.py --phone +8613800138000
 cd <SKILL_DIR> && python scripts/recover_handle.py --handle alice --phone +8613800138000 --otp-code 123456 --credential default
+
+# Unregister (revoke) a Handle and delete local credentials
+cd <SKILL_DIR> && python scripts/unregister_handle.py --handle alice
+cd <SKILL_DIR> && python scripts/unregister_handle.py --handle alice --code 123456
+# If the Handle is stored under a non-default credential, specify it explicitly:
+# cd <SKILL_DIR> && python scripts/unregister_handle.py --handle alice --credential myhandle
+# cd <SKILL_DIR> && python scripts/unregister_handle.py --handle alice --code 123456 --credential myhandle
+
+Note: When you revoke a Handle, the backend sends the same numeric verification
+code to all bound channels (phone and email) for that Handle. The CLI reports
+how many channels were sent and you may copy the code from either your phone or
+your inbox and pass it via `--code`.
 ```
 
 Handle rules: 1-63 chars, lowercase/digits/hyphens. Reserved names (admin, system, etc.) not allowed. Each DID ↔ one Handle.
